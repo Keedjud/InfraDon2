@@ -3,6 +3,8 @@ import PouchDB from 'pouchdb'
 import { onMounted, ref } from 'vue';
 
 declare interface Post {
+  _id: string
+  _rev: string
   title: string
   content: string
   attributes: {
@@ -12,6 +14,7 @@ declare interface Post {
 
 const storage = ref();
 const postsData = ref<Post[]>([])
+let counter = 0;
 
 onMounted(() => {
   console.log('=> Composant initialisé');
@@ -45,9 +48,10 @@ const fetchData = (): any => {
 }
 
 const createDoc = (): any => {
+  counter++
   storage.value
     .post({
-      title: 'Document',
+      title: 'Document' + counter,
       content: 'Contenu du document ',
     })
     .then(function (response: any) {
@@ -58,6 +62,32 @@ const createDoc = (): any => {
       console.log(err)
     })
 }
+
+const deleteDoc = (post: any): any => {
+  storage.value
+    .remove(post)
+    .then(function (response: any) {
+      fetchData()
+      console.log(response)
+    })
+    .catch(function (err: any) {
+      console.log(err)
+    })
+}
+
+const updateDoc = (post: any): any => {
+  post.content = post.content + ' (modifié)'
+  storage.value
+    .put(post)
+    .then(function (response: any) {
+      fetchData()
+      console.log(response)
+    })
+    .catch(function (err: any) {
+      console.log(err)
+    })
+}
+
 </script>
 
 <template>
@@ -65,6 +95,8 @@ const createDoc = (): any => {
   <article v-for="post in postsData" v-bind:key="(post as any).id">
     <h2>{{ post.title }}</h2>
     <p>{{ post.content }}</p>
+    <button @click="deleteDoc(post)">Supprimer le document</button>
+    <button @click="updateDoc(post)">Modifier le document</button>
   </article>
   <button @click="createDoc">Ajouter un document</button>
 </template>
