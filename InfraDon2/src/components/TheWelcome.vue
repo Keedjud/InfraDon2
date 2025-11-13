@@ -13,7 +13,8 @@ declare interface Post {
 }
 
 const storage = ref();
-const REMOTE = 'http://inoe.wenger:IWtramp54HEIG/@localhost:5984/infradon_inoe_db/'
+const url = 'http://inoe.wenger:IWtramp54HEIG/@localhost:5984/infradon_inoe_db/'
+const opts = { live: true, retry: true };
 const postsData = ref<Post[]>([])
 let counter = 0;
 
@@ -28,7 +29,6 @@ const initDatabase = () => {
   if (db) {
     console.log("Connected to collection : " + db?.name)
     storage.value = db
-    // start continuous two-way sync after DB is ready
     startSync(db)
     fetchData()
   } else {
@@ -39,13 +39,14 @@ const initDatabase = () => {
 
 const startSync = (db: any) => {
   if (!db) return
-  db.sync(REMOTE, {
-    live: true,
-    retry: true
-  }).on('change', (change: any) => {
+  db.sync(url, opts)
+    .on('change', (change: any) => {
       console.log('sync change', change)
       fetchData()
     })
+}
+const toggle = () => {
+
 }
 
 const fetchData = (): any => {
@@ -101,10 +102,6 @@ const updateDoc = (post: any): any => {
     })
 }
 
-// const updateDistant = () => {
-//   storage.value.replicate.to(REMOTE)
-// }
-
 </script>
 
 <template>
@@ -116,5 +113,8 @@ const updateDoc = (post: any): any => {
     <button @click="updateDoc(post)">Modifier le document</button>
   </article>
   <button @click="createDoc">Ajouter un document</button>
-  <!-- <button @click="updateDistant">Mettre à jour la db distante</button> -->
+  <div>
+    <input @click="toggle" type="checkbox" name="toggleSync" checked />
+    <label for="toggleSync">Toggle Sync</label>
+  </div>
 </template>
