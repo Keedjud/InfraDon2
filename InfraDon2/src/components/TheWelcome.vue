@@ -19,25 +19,25 @@ let counter = 0;
 onMounted(() => {
   console.log('=> Composant initialisé');
   initDatabase()
-  fetchData()
 });
 
 const initDatabase = () => {
   console.log('=> Connexion à la base de données');
-  const db = new PouchDB('http://inoe.wenger:IWtramp54HEIG/@localhost:5984/infradon_inoe_db/')
+  const db = new PouchDB('local')
   if (db) {
     console.log("Connected to collection : " + db?.name)
     storage.value = db
+    db.replicate.from('http://inoe.wenger:IWtramp54HEIG/@localhost:5984/infradon_inoe_db/')
+    fetchData()
   } else {
     console.warn('Something went wrong')
   }
+  return db
 }
 
 const fetchData = (): any => {
   storage.value
-    .allDocs({
-      include_docs: true,
-    })
+    .allDocs({ include_docs: true, attachments: true })
     .then((result: any) => {
       console.log('=> Données récupérées :', result.rows)
       postsData.value = result.rows.map((row: any) => row.doc)
@@ -79,14 +79,18 @@ const updateDoc = (post: any): any => {
   post.content = post.content + ' (modifié)'
   storage.value
     .put(post)
-    .then(function (response: any) {
+    .then((response: any) => {
       fetchData()
       console.log(response)
     })
-    .catch(function (err: any) {
+    .catch((err: any) => {
       console.log(err)
     })
 }
+
+// const updateDistant = (post: any): any => {
+//   db.replicate.to('http://inoe.wenger:IWtramp54HEIG/@localhost:5984/infradon_inoe_db/')
+// }
 
 </script>
 
@@ -99,4 +103,5 @@ const updateDoc = (post: any): any => {
     <button @click="updateDoc(post)">Modifier le document</button>
   </article>
   <button @click="createDoc">Ajouter un document</button>
+  <!-- <button @click="updateDistant">Mettre à jour la db distante</button> -->
 </template>
