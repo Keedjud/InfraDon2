@@ -13,6 +13,7 @@ declare interface Post {
 }
 
 const storage = ref();
+const REMOTE = 'http://inoe.wenger:IWtramp54HEIG/@localhost:5984/infradon_inoe_db/'
 const postsData = ref<Post[]>([])
 let counter = 0;
 
@@ -27,12 +28,24 @@ const initDatabase = () => {
   if (db) {
     console.log("Connected to collection : " + db?.name)
     storage.value = db
-    db.replicate.from('http://inoe.wenger:IWtramp54HEIG/@localhost:5984/infradon_inoe_db/')
+    // start continuous two-way sync after DB is ready
+    startSync(db)
     fetchData()
   } else {
     console.warn('Something went wrong')
   }
   return db
+}
+
+const startSync = (db: any) => {
+  if (!db) return
+  db.sync(REMOTE, {
+    live: true,
+    retry: true
+  }).on('change', (change: any) => {
+      console.log('sync change', change)
+      fetchData()
+    })
 }
 
 const fetchData = (): any => {
@@ -88,8 +101,8 @@ const updateDoc = (post: any): any => {
     })
 }
 
-// const updateDistant = (post: any): any => {
-//   db.replicate.to('http://inoe.wenger:IWtramp54HEIG/@localhost:5984/infradon_inoe_db/')
+// const updateDistant = () => {
+//   storage.value.replicate.to(REMOTE)
 // }
 
 </script>
