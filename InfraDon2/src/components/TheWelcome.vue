@@ -16,6 +16,7 @@ const storage = ref();
 const url = 'http://inoe.wenger:IWtramp54HEIG/@localhost:5984/infradon_inoe_db/'
 const opts = { live: true, retry: true };
 const postsData = ref<Post[]>([])
+const sync = ref();
 let counter = 0;
 
 onMounted(() => {
@@ -25,28 +26,62 @@ onMounted(() => {
 
 const initDatabase = () => {
   console.log('=> Connexion à la base de données');
-  const db = new PouchDB('local')
-  if (db) {
-    console.log("Connected to collection : " + db?.name)
-    storage.value = db
-    startSync(db)
+  const localdb = new PouchDB('local')
+  if (localdb) {
+    console.log("Connected to collection : " + localdb?.name)
+    storage.value = localdb
+    storage.value.createIndex({
+      index: {
+        fields: ['content']
+      }
+    })
+    .then(console.log("index created"))
+    localdb.replicate.from(url)
+    .on('complete', syncData)
     fetchData()
   } else {
     console.warn('Something went wrong')
   }
-  return db
 }
 
-const startSync = (db: any) => {
-  if (!db) return
-  db.sync(url, opts)
-    .on('change', (change: any) => {
-      console.log('sync change', change)
-      fetchData()
-    })
+const syncData = () => {
+  sync.value = storage.value
+  .sync(url, opts)
+  .on('change', fetchData)
 }
+
 const toggle = () => {
+  if (sync.value) {
+    sync.value.cancel()
+    sync.value = null
+  } else {
+    syncData()
+  }
+}
 
+const search = (event: any) => {
+  event.target.blur()
+
+  if (event.target.value === "") {
+    fetchData();
+  } else {
+    storage.value.find({
+      selector: {content: `Contenu du document : ${event.target.value}`}
+    })
+    .then((result: any) => {
+      console.log('=> Données récupérées :', result.docs)
+      postsData.value = result.docs
+      // console.log(postsData)
+    })
+    .catch((error: any) => {
+      console.error('Erreur lors de la récupération des données :', error)
+    })
+  }
+}
+
+const searchReset = () => {
+  document.querySelector(".search").value = ""
+  fetchData()
 }
 
 const fetchData = (): any => {
@@ -106,15 +141,23 @@ const updateDoc = (post: any): any => {
 
 <template>
   <h1>Fetch Data</h1>
+  <div>
+    <label v-if="sync"> Online</label>
+    <label v-else> Offline</label>
+    <input @click="toggle" type="checkbox" name="toggleSync" />
+    <label for="toggleSync">Toggle Sync</label>
+  </div>
+  <div>
+    <input type="text" placeholder="Search" @keyup.enter="search" class="search">
+    <button @click="searchReset">X</button>
+  </div>
+  <div>
+    <button @click="createDoc">Ajouter un document</button>
+  </div>
   <article v-for="post in postsData" v-bind:key="(post as any).id">
     <h2>{{ post.title }}</h2>
     <p>{{ post.content }}</p>
     <button @click="deleteDoc(post)">Supprimer le document</button>
     <button @click="updateDoc(post)">Modifier le document</button>
   </article>
-  <button @click="createDoc">Ajouter un document</button>
-  <div>
-    <input @click="toggle" type="checkbox" name="toggleSync" checked />
-    <label for="toggleSync">Toggle Sync</label>
-  </div>
 </template>
