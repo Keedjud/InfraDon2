@@ -190,6 +190,56 @@ const updateDoc = (post: any): any => {
     })
 }
 
+// ===== FACTORY - GÉNÉRER DONNÉES TEST =====
+const generateTestData = async () => {
+  console.log('=> Génération des données de test...');
+  
+  const titles = [
+    'Mon premier post',
+    'Découverte intéressante',
+    'Réflexion du jour',
+    'News importante',
+    'Question pour vous',
+    'Partage d\'expérience',
+    'Conseil utile',
+    'Actualité tech'
+  ]
+
+  const contents = [
+    'Ceci est le contenu du post numéro',
+    'Je voudrais partager avec vous',
+    'Vous pensez quoi de',
+    'Récemment j\'ai découvert',
+    'Pourquoi ne pas essayer',
+    'Voici mon avis sur',
+    'Important à savoir',
+    'Fait intéressant'
+  ]
+
+  for (let i = 0; i < 15; i++) {
+    const post: Post = {
+      _id: `post_test_${i}_${Date.now()}`,
+      type: 'post',
+      title: titles[i % titles.length] + ' ' + i,
+      content: contents[i % contents.length] + ' ' + i,
+      likes: Math.floor(Math.random() * 50),
+      comments: [],
+      creation_date: new Date(Date.now() - Math.random() * 7 * 24 * 60 * 60 * 1000).toISOString(),
+      updated_date: new Date().toISOString()
+    }
+
+    try {
+      await storage.value.post(post)
+      console.log('✓ Post ' + i + ' créé')
+    } catch (err: any) {
+      console.error('Erreur création post test:', err)
+    }
+  }
+
+  console.log('=> Génération terminée');
+  fetchData()
+}
+
 </script>
 
 <template>
@@ -206,10 +256,12 @@ const updateDoc = (post: any): any => {
   </div>
   <div>
     <button @click="createDoc">Ajouter un document</button>
+    <button @click="generateTestData">🧪 Générer données test (15 posts)</button>
   </div>
   <article v-for="post in postsData" v-bind:key="(post as any).id">
     <h2>{{ post.title }}</h2>
     <p>{{ post.content }}</p>
+    <p>👍 {{ post.likes }} likes</p>
     <button @click="deleteDoc(post)">Supprimer le document</button>
     <button @click="updateDoc(post)">Modifier le document</button>
   </article>
