@@ -138,10 +138,13 @@ const searchReset = () => {
 
 const fetchData = (): any => {
   storage.value
-    .allDocs({ include_docs: true, attachments: true })
+    .find({
+      selector: { type: 'post' },
+      sort: [{ creation_date: 'desc' }]
+    })
     .then((result: any) => {
-      console.log('=> Données récupérées :', result.rows)
-      postsData.value = result.rows.map((row: any) => row.doc)
+      console.log('=> Posts récupérés :', result.docs.length)
+      postsData.value = result.docs as Post[]
     })
     .catch((error: any) => {
       console.error('Erreur lors de la récupération des données :', error)
