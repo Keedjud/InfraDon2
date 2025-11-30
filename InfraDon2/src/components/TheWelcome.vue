@@ -240,6 +240,29 @@ const generateTestData = async () => {
   fetchData()
 }
 
+// ===== SUPPRIMER TOUS LES POSTS =====
+const deleteAllPosts = async () => {
+  if (!confirm('Êtes-vous sûr ? Tous les posts seront supprimés !')) {
+    return;
+  }
+
+  console.log('=> Suppression de tous les posts...');
+
+  try {
+    const result = await storage.value.allDocs()
+    const posts = result.rows.map((row: any) => ({
+      ...row.doc,
+      _deleted: true
+    }))
+
+    await storage.value.bulkDocs(posts)
+    console.log('Tous les posts supprimés')
+    fetchData()
+  } catch (err: any) {
+    console.error('Erreur suppression posts:', err)
+  }
+}
+
 </script>
 
 <template>
@@ -257,6 +280,7 @@ const generateTestData = async () => {
   <div>
     <button @click="createDoc">Ajouter un document</button>
     <button @click="generateTestData">🧪 Générer données test (15 posts)</button>
+    <button @click="deleteAllPosts" style="background: #e74c3c;">🗑️ Supprimer tous les posts</button>
   </div>
   <article v-for="post in postsData" v-bind:key="(post as any).id">
     <h2>{{ post.title }}</h2>
