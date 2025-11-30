@@ -246,18 +246,20 @@ const deleteAllPosts = async () => {
     return;
   }
 
-  console.log('=> Suppression de tous les posts...');
+  console.log('=> Suppression définitive de tous les posts...');
 
   try {
-    const result = await storage.value.allDocs()
-    const posts = result.rows.map((row: any) => ({
-      ...row.doc,
-      _deleted: true
-    }))
+    // Supprimer la base de données locale COMPLÈTEMENT
+    await storage.value.destroy()
 
-    await storage.value.bulkDocs(posts)
-    console.log('Tous les posts supprimés')
-    fetchData()
+    // Recréer une base vide
+    storage.value = new PouchDB('local')
+
+    // Recréer les indexes
+    createIndexes()
+
+    console.log('Tous les posts supprimés');
+    postsData.value = []
   } catch (err: any) {
     console.error('Erreur suppression posts:', err)
   }
