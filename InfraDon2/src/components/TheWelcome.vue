@@ -260,6 +260,45 @@ const toggleLike = (post: Post): any => {
     })
 }
 
+// ===== SYSTÈME DE COMMENTAIRES =====
+const addComment = (post: Post): any => {
+  // Récupérer le contenu du commentaire depuis l'input
+  const commentInput = document.querySelector(`.comment-input-${post._id}`) as HTMLInputElement
+  const commentContent = commentInput?.value.trim()
+
+  // Validation
+  if (!commentContent) {
+    console.warn('Le commentaire ne peut pas être vide')
+    return
+  }
+
+  console.log('=> Ajout d\'un commentaire au post:', post._id);
+
+  // Créer le nouveau commentaire
+  const newComment: Comment = {
+    _id: `comment_${Date.now()}`,
+    content: commentContent,
+    author: 'Toi',
+    creation_date: new Date().toISOString()
+  }
+
+  // Ajouter le commentaire au post
+  post.comments.push(newComment)
+  post.updated_date = new Date().toISOString()
+
+  // Sauvegarder le post modifié
+  storage.value
+    .put(post)
+    .then((response: any) => {
+      console.log('Commentaire ajouté :', response)
+      commentInput.value = ""  // Vider l'input
+      fetchData()
+    })
+    .catch((err: any) => {
+      console.error('Erreur ajout commentaire :', err)
+    })
+}
+
 // ===== FACTORY - GÉNÉRER DONNÉES TEST =====
 const generateTestData = async () => {
   console.log('=> Génération des données de test...');
@@ -351,32 +390,249 @@ const deleteAllPosts = async () => {
   </div>
 
   <!-- SECTION CRÉATION POST -->
-  <div style="background: #ecf0f1; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+  <div class="create-section">
     <h2>📝 Créer un post</h2>
     <input
       type="text"
       class="input-title"
       placeholder="Titre du post"
-      style="width: 100%; padding: 10px; margin-bottom: 10px; border: 1px solid #bdc3c7; border-radius: 5px;"
     >
     <textarea
       class="input-content"
       placeholder="Contenu du post"
-      style="width: 100%; padding: 10px; margin-bottom: 10px; border: 1px solid #bdc3c7; border-radius: 5px; min-height: 80px;"
     ></textarea>
-    <button @click="createDoc" style="background: #27ae60;">➕ Ajouter un post</button>
-    <button @click="generateTestData" style="background: #9b59b6;">🧪 Générer données test (15 posts)</button>
-    <button @click="deleteAllPosts" style="background: #e74c3c;">🗑️ Supprimer tous les posts</button>
+    <button @click="createDoc" class="btn-primary">➕ Ajouter un post</button>
+    <button @click="generateTestData" class="btn-secondary">🧪 Générer données test (15 posts)</button>
+    <button @click="deleteAllPosts" class="btn-danger">🗑️ Supprimer tous les posts</button>
   </div>
 
   <!-- LISTE DES POSTS -->
-  <article v-for="post in postsData" v-bind:key="(post as any)._id">
+  <article v-for="post in postsData" v-bind:key="(post as any)._id" class="post-card">
     <h2>{{ post.title }}</h2>
     <p>{{ post.content }}</p>
-    <button @click="deleteDoc(post)">Supprimer le document</button>
-    <button @click="updateDoc(post)">Modifier le document</button>
-    <button @click="toggleLike(post)" style="background: #f39c12; color: white; padding: 8px 12px; border: none; border-radius: 5px; cursor: pointer;">
+    <div class="post-actions">
+      <button @click="deleteDoc(post)" class="btn-small">Supprimer le document</button>
+      <button @click="updateDoc(post)" class="btn-small">Modifier le document</button>
+    </div>
+    <button @click="toggleLike(post)" class="btn-like">
       👍 {{ post.likes }} likes
     </button>
+
+    <!-- SECTION COMMENTAIRES -->
+    <div class="comments-section">
+      <h3>💬 Commentaires ({{ post.comments.length }})</h3>
+      <div v-for="comment in post.comments" :key="comment._id" class="comment">
+        <strong>{{ comment.author }}</strong>
+        <span class="comment-date">({{ new Date(comment.creation_date).toLocaleString() }})</span>
+        <p>{{ comment.content }}</p>
+      </div>
+      <div class="comment-input-wrapper">
+        <input
+          type="text"
+          :class="`comment-input-${post._id}`"
+          placeholder="Ajouter un commentaire"
+          class="comment-input"
+        >
+        <button @click="addComment(post)" class="btn-comment">
+          💬 Commenter
+        </button>
+      </div>
+    </div>
   </article>
 </template>
+
+<style scoped>
+/* ===== VARIABLES COULEURS ===== */
+:root {
+  --primary: #3498db;
+  --primary-dark: #2980b9;
+  --success: #27ae60;
+  --warning: #f39c12;
+  --danger: #e74c3c;
+  --secondary: #9b59b6;
+  --light-bg: #ecf0f1;
+  --border-color: #bdc3c7;
+  --text-muted: #95a5a6;
+}
+
+/* ===== GÉNÉRIQUES ===== */
+h1 {
+  text-align: center;
+  color: #2c3e50;
+  margin-bottom: 20px;
+}
+
+h2 {
+  color: #34495e;
+  margin-top: 0;
+}
+
+h3 {
+  color: #34495e;
+  font-size: 1.1em;
+  margin-bottom: 10px;
+}
+
+p {
+  color: #34495e;
+  line-height: 1.6;
+}
+
+/* ===== INPUTS ===== */
+input[type="text"],
+textarea,
+.comment-input {
+  width: 100%;
+  padding: 10px;
+  margin-bottom: 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 5px;
+  font-family: Arial, sans-serif;
+  box-sizing: border-box;
+}
+
+textarea {
+  resize: vertical;
+  min-height: 80px;
+}
+
+input[type="checkbox"] {
+  margin-right: 5px;
+}
+
+/* ===== BOUTONS ===== */
+button {
+  padding: 10px 12px;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  font-weight: bold;
+  transition: background-color 0.3s;
+  margin-right: 10px;
+  margin-bottom: 10px;
+}
+
+.btn-primary {
+  background-color: var(--success);
+  color: white;
+}
+
+.btn-primary:hover {
+  background-color: #229954;
+}
+
+.btn-secondary {
+  background-color: var(--secondary);
+  color: white;
+}
+
+.btn-secondary:hover {
+  background-color: #8e44ad;
+}
+
+.btn-danger {
+  background-color: var(--danger);
+  color: white;
+}
+
+.btn-danger:hover {
+  background-color: #c0392b;
+}
+
+.btn-like {
+  background-color: var(--warning);
+  color: white;
+  padding: 8px 12px;
+}
+
+.btn-like:hover {
+  background-color: #e67e22;
+}
+
+.btn-small {
+  background-color: var(--primary);
+  color: white;
+  padding: 6px 10px;
+  font-size: 0.9em;
+  margin-right: 5px;
+}
+
+.btn-small:hover {
+  background-color: var(--primary-dark);
+}
+
+.btn-comment {
+  background-color: var(--primary);
+  color: white;
+  padding: 8px 12px;
+}
+
+.btn-comment:hover {
+  background-color: var(--primary-dark);
+}
+
+/* ===== SECTIONS ===== */
+.create-section {
+  background-color: var(--light-bg);
+  padding: 20px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+}
+
+.post-card {
+  background: white;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 20px;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+}
+
+.post-actions {
+  margin: 15px 0;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--light-bg);
+}
+
+/* ===== SECTION COMMENTAIRES ===== */
+.comments-section {
+  background-color: var(--light-bg);
+  padding: 15px;
+  margin-top: 15px;
+  border-radius: 5px;
+}
+
+.comment {
+  background-color: white;
+  padding: 12px;
+  margin-bottom: 10px;
+  border-left: 4px solid var(--primary);
+  border-radius: 3px;
+}
+
+.comment strong {
+  color: #2c3e50;
+}
+
+.comment-date {
+  font-size: 0.85em;
+  color: var(--text-muted);
+  margin-left: 5px;
+}
+
+.comment p {
+  margin: 8px 0 0 0;
+  color: #34495e;
+}
+
+.comment-input-wrapper {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.comment-input {
+  flex: 1;
+  margin-bottom: 0;
+}
+</style>
