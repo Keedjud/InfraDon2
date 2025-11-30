@@ -42,18 +42,56 @@ const initDatabase = () => {
   if (localdb) {
     console.log("Connected to collection : " + localdb?.name)
     storage.value = localdb
-    storage.value.createIndex({
-      index: {
-        fields: ['content']
-      }
-    })
-    .then(console.log("index created"))
+
+    // Créer les indexes
+    createIndexes()
+
     localdb.replicate.from(url)
     .on('complete', syncData)
     fetchData()
   } else {
     console.warn('Something went wrong')
   }
+}
+
+const createIndexes = () => {
+  console.log('=> Création des indexes');
+
+  // Index sur le titre (pour la recherche)
+  storage.value.createIndex({
+    index: {
+      fields: ['title']
+    }
+  })
+  .then(() => console.log("Index 'title' créé"))
+  .catch((err: any) => console.error("Erreur index title:", err))
+
+  // Index sur le contenu (pour la recherche)
+  storage.value.createIndex({
+    index: {
+      fields: ['content']
+    }
+  })
+  .then(() => console.log("Index 'content' créé"))
+  .catch((err: any) => console.error("Erreur index content:", err))
+
+  // Index sur le nombre de likes (pour le tri)
+  storage.value.createIndex({
+    index: {
+      fields: ['likes']
+    }
+  })
+  .then(() => console.log("Index 'likes' créé"))
+  .catch((err: any) => console.error("Erreur index likes:", err))
+
+  // Index sur le type (pour filtrer uniquement les posts)
+  storage.value.createIndex({
+    index: {
+      fields: ['type']
+    }
+  })
+  .then(() => console.log("Index 'type' créé"))
+  .catch((err: any) => console.error("Erreur index type:", err))
 }
 
 const syncData = () => {
