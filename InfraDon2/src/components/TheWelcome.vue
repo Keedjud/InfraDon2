@@ -1,16 +1,16 @@
 <script setup lang="ts">
 import PouchDB from 'pouchdb'
-import { onMounted, ref } from 'vue';
-import findPlugin from "pouchdb-find";
-PouchDB.plugin(findPlugin);
+import { onMounted, ref } from 'vue'
+import findPlugin from 'pouchdb-find'
+PouchDB.plugin(findPlugin)
 
 // ===== INTERFACES =====
 declare interface Comment {
   _id: string
-  postId: string          // ← NOUVEAU : référence au post
+  postId: string // ← NOUVEAU : référence au post
   content: string
   author: string
-  type: 'comment'         // ← NOUVEAU : pour identifier c'est un commentaire
+  type: 'comment' // ← NOUVEAU : pour identifier c'est un commentaire
   creation_date: string
 }
 
@@ -26,27 +26,29 @@ declare interface Post {
   updated_date: string
 }
 
-const storage = ref();
+const storage = ref()
 const url = 'http://inoe.wenger:IWtramp54HEIG/@localhost:5984/infradon_inoe_db/'
-const opts = { live: true, retry: true };
+const opts = { live: true, retry: true }
 const postsData = ref<Post[]>([])
-const sync = ref();
+const sync = ref()
 const replicationStatus = ref<string>('En attente...')
 const isReplicating = ref<boolean>(false)
 const isOnline = ref<boolean>(true)
-const syncStatus = ref<string>('En ligne')
+const syncStatus = ref<string>('Synchronisé')
 const lastSyncTime = ref<string>('')
+const offlineMode = ref<boolean>(false)
+const offlineChanges = ref<number>(0)
 
 onMounted(() => {
-  console.log('=> Composant initialisé');
+  console.log('=> Composant initialisé')
   initDatabase()
-});
+})
 
 const initDatabase = async () => {
-  console.log('=> Connexion à la base de données');
+  console.log('=> Connexion à la base de données')
   const localdb = new PouchDB('local')
   if (localdb) {
-    console.log("Connected to collection : " + localdb?.name)
+    console.log('Connected to collection : ' + localdb?.name)
     storage.value = localdb
 
     await createIndexes()
@@ -57,12 +59,12 @@ const initDatabase = async () => {
 }
 
 const replicateFromServer = () => {
-  console.log('=> Début de la réplication depuis le serveur');
+  console.log('=> Début de la réplication depuis le serveur')
   isReplicating.value = true
   replicationStatus.value = '⏳ Réplication en cours...'
 
-  storage.value
-    .replicate.from(url)
+  storage.value.replicate
+    .from(url)
     .on('change', (info: any) => {
       console.log('=> Changement lors de la réplication:', info.docs_read + ' documents lus')
       replicationStatus.value = `⏳ ${info.docs_read} documents synchronisés...`
@@ -83,30 +85,30 @@ const replicateFromServer = () => {
     .on('denied', (err: any) => {
       console.error('Accès refusé :', err)
       isReplicating.value = false
-      replicationStatus.value = '✗ Accès refusé'
+      replicationStatus.value = 'Accès refusé'
     })
 }
 
 const syncData = () => {
-  console.log('=> Lancement de la synchronisation bidirectionnelle');
-  
+  console.log('=> Lancement de la synchronisation bidirectionnelle')
+
   sync.value = storage.value
     .sync(url, opts)
     .on('change', (change: any) => {
       console.log('=> Changement détecté lors de la sync:', change)
-      
+
       // Déterminer la direction
       if (change.direction === 'pull') {
         console.log('  ← Pull : ' + change.change.docs.length + ' doc(s) du serveur')
       } else if (change.direction === 'push') {
         console.log('  → Push : ' + change.change.docs.length + ' doc(s) vers le serveur')
       }
-      
+
       lastSyncTime.value = new Date().toLocaleTimeString()
     })
     .on('paused', () => {
       console.log('=> Sync en pause (normal)')
-      syncStatus.value = '✓ Synchronisé'
+      syncStatus.value = 'Synchronisé'
       isOnline.value = true
     })
     .on('active', () => {
@@ -131,34 +133,32 @@ const search = (event: any) => {
 
   const query = event.target.value.trim()
 
-  if (query === "") {
+  if (query === '') {
     fetchData()
     return
   }
 
-  console.log('=> Recherche sur :', query);
+  console.log('=> Recherche sur :', query)
 
-  storage.value.find({
-    selector: {
-      type: 'post',
-      $or: [
-        { title: { $regex: query } },
-        { content: { $regex: query } }
-      ]
-    }
-  })
-  .then(async (result: any) => {
-    console.log('=> Résultats trouvés :', result.docs.length)
-    const postsWithComments = await attachComments(result.docs)
-    postsData.value = postsWithComments as Post[]
-  })
-  .catch((error: any) => {
-    console.error('Erreur lors de la recherche :', error)
-  })
+  storage.value
+    .find({
+      selector: {
+        type: 'post',
+        $or: [{ title: { $regex: query } }, { content: { $regex: query } }],
+      },
+    })
+    .then(async (result: any) => {
+      console.log('=> Résultats trouvés :', result.docs.length)
+      const postsWithComments = await attachComments(result.docs)
+      postsData.value = postsWithComments as Post[]
+    })
+    .catch((error: any) => {
+      console.error('Erreur lors de la recherche :', error)
+    })
 }
 
 const createIndexes = async () => {
-  console.log('=> Création des indexes');
+  console.log('=> Création des indexes')
 
   try {
     await storage.value.createIndex({ index: { fields: ['title'] } })
@@ -183,25 +183,25 @@ const createIndexes = async () => {
   }
 }
 
-
 const sortByLikes = (): any => {
-  console.log('=> Tri par nombre de likes');
+  console.log('=> Tri par nombre de likes')
 
-  storage.value.find({
-    selector: {
-      type: 'post',
-      likes: { $gte: 0 }  // ← Force l'utilisation de l'index
-    },
-    sort: [{ type: 'asc' }, { likes: 'desc' }]  // ← Trier par type PUIS par likes
-  })
-  .then(async (result: any) => {
-    console.log('=> Posts triés par likes :', result.docs.length)
-    const postsWithComments = await attachComments(result.docs)
-    postsData.value = postsWithComments as Post[]
-  })
-  .catch((error: any) => {
-    console.error('Erreur lors du tri :', error)
-  })
+  storage.value
+    .find({
+      selector: {
+        type: 'post',
+        likes: { $gte: 0 }, // ← Force l'utilisation de l'index
+      },
+      sort: [{ type: 'asc' }, { likes: 'desc' }], // ← Trier par type PUIS par likes
+    })
+    .then(async (result: any) => {
+      console.log('=> Posts triés par likes :', result.docs.length)
+      const postsWithComments = await attachComments(result.docs)
+      postsData.value = postsWithComments as Post[]
+    })
+    .catch((error: any) => {
+      console.error('Erreur lors du tri :', error)
+    })
 }
 
 const fetchData = async (posts?: Post[]): Promise<any> => {
@@ -209,7 +209,7 @@ const fetchData = async (posts?: Post[]): Promise<any> => {
   if (!posts) {
     storage.value
       .find({
-        selector: { type: 'post' }
+        selector: { type: 'post' },
       })
       .then(async (result: any) => {
         console.log('=> Posts récupérés :', result.docs.length)
@@ -228,25 +228,27 @@ const fetchData = async (posts?: Post[]): Promise<any> => {
 // Fonction utilitaire pour ajouter les commentaires aux posts
 const attachComments = async (posts: Post[]): Promise<Post[]> => {
   const results = await Promise.all(
-    posts.map(post =>
-      storage.value.find({
-        selector: {
-          type: 'comment',
-          postId: post._id
-        }
-      }).then((commentsResult: any) => ({
-        ...post,
-        comments: commentsResult.docs as Comment[]
-      }))
-    )
+    posts.map((post) =>
+      storage.value
+        .find({
+          selector: {
+            type: 'comment',
+            postId: post._id,
+          },
+        })
+        .then((commentsResult: any) => ({
+          ...post,
+          comments: commentsResult.docs as Comment[],
+        })),
+    ),
   )
   return results
 }
 
 const createDoc = (): any => {
   // Récupérer les valeurs des inputs
-  const titleInput = document.querySelector(".input-title") as HTMLInputElement
-  const contentInput = document.querySelector(".input-content") as HTMLInputElement
+  const titleInput = document.querySelector('.input-title') as HTMLInputElement
+  const contentInput = document.querySelector('.input-content') as HTMLInputElement
 
   const title = titleInput?.value.trim()
   const content = contentInput?.value.trim()
@@ -257,7 +259,7 @@ const createDoc = (): any => {
     return
   }
 
-  console.log('=> Création d\'un nouveau post');
+  console.log("=> Création d'un nouveau post")
 
   const newPost: Post = {
     _id: `post_${Date.now()}`,
@@ -266,16 +268,16 @@ const createDoc = (): any => {
     content: content,
     likes: 0,
     creation_date: new Date().toISOString(),
-    updated_date: new Date().toISOString()
+    updated_date: new Date().toISOString(),
   }
 
   storage.value
     .post(newPost)
     .then((response: any) => {
       console.log('Post créé :', response)
-      // Vider les inputs
-      titleInput.value = ""
-      contentInput.value = ""
+      titleInput.value = ''
+      contentInput.value = ''
+      trackLocalChange()
       fetchData()
     })
     .catch((err: any) => {
@@ -284,12 +286,13 @@ const createDoc = (): any => {
 }
 
 const deleteDoc = (post: Post): any => {
-  console.log('=> Suppression du post:', post._id);
+  console.log('=> Suppression du post:', post._id)
 
   storage.value
     .remove(post)
     .then((response: any) => {
       console.log('Post supprimé :', response)
+      trackLocalChange()
       fetchData()
     })
     .catch((err: any) => {
@@ -300,10 +303,10 @@ const deleteDoc = (post: Post): any => {
 const updateDoc = (post: Post): any => {
   // Récupérer les nouvelles valeurs
   const newTitle = prompt('Nouveau titre:', post.title)
-  if (newTitle === null) return  // Annulation
+  if (newTitle === null) return // Annulation
 
   const newContent = prompt('Nouveau contenu:', post.content)
-  if (newContent === null) return  // Annulation
+  if (newContent === null) return // Annulation
 
   // Validation
   if (!newTitle.trim() || !newContent.trim()) {
@@ -311,7 +314,7 @@ const updateDoc = (post: Post): any => {
     return
   }
 
-  console.log('=> Modification du post:', post._id);
+  console.log('=> Modification du post:', post._id)
 
   // Modifier le post
   post.title = newTitle.trim()
@@ -322,6 +325,7 @@ const updateDoc = (post: Post): any => {
     .put(post)
     .then((response: any) => {
       console.log('Post modifié :', response)
+      trackLocalChange()
       fetchData()
     })
     .catch((err: any) => {
@@ -331,7 +335,7 @@ const updateDoc = (post: Post): any => {
 
 // ===== SYSTÈME DE LIKES =====
 const toggleLike = (post: Post): any => {
-  console.log('=> Toggle like sur post:', post._id);
+  console.log('=> Toggle like sur post:', post._id)
 
   // Incrémenter le compteur
   post.likes++
@@ -340,7 +344,8 @@ const toggleLike = (post: Post): any => {
   storage.value
     .put(post)
     .then((response: any) => {
-      console.log('✓ Post liké :', response)
+      console.log('Post liké :', response)
+      trackLocalChange()
       fetchData()
     })
     .catch((err: any) => {
@@ -360,16 +365,16 @@ const addComment = (post: Post): any => {
     return
   }
 
-  console.log('=> Ajout d\'un commentaire au post:', post._id);
+  console.log("=> Ajout d'un commentaire au post:", post._id)
 
   // Créer le nouveau commentaire
   const newComment: Comment = {
     _id: `comment_${Date.now()}`,
-    postId: post._id,              // ← Référence au post
+    postId: post._id, // ← Référence au post
     content: commentContent,
     author: 'Toi',
-    type: 'comment',               // ← Type commentaire
-    creation_date: new Date().toISOString()
+    type: 'comment', // ← Type commentaire
+    creation_date: new Date().toISOString(),
   }
 
   // Sauvegarder le commentaire comme DOCUMENT INDÉPENDANT
@@ -377,8 +382,9 @@ const addComment = (post: Post): any => {
     .post(newComment)
     .then((response: any) => {
       console.log('Commentaire ajouté :', response)
-      commentInput.value = ""  // Vider l'input
-      fetchData()              // Récupérer et afficher les posts avec leurs commentaires
+      commentInput.value = ''
+      trackLocalChange()
+      fetchData()
     })
     .catch((err: any) => {
       console.error('Erreur ajout commentaire :', err)
@@ -386,14 +392,15 @@ const addComment = (post: Post): any => {
 }
 
 const deleteComment = (post: Post, comment: Comment): any => {
-  console.log('=> Suppression du commentaire:', comment._id);
+  console.log('=> Suppression du commentaire:', comment._id)
 
   // Supprimer le commentaire comme DOCUMENT INDÉPENDANT
   storage.value
     .remove(comment)
     .then((response: any) => {
       console.log('Commentaire supprimé :', response)
-      fetchData()  // Récupérer et afficher les posts avec leurs commentaires
+      trackLocalChange()
+      fetchData()
     })
     .catch((err: any) => {
       console.error('Erreur suppression commentaire :', err)
@@ -402,7 +409,7 @@ const deleteComment = (post: Post, comment: Comment): any => {
 
 // ===== FACTORY - GÉNÉRER DONNÉES TEST =====
 const generateTestData = async () => {
-  console.log('=> Génération des données de test...');
+  console.log('=> Génération des données de test...')
 
   const titles = [
     'Mon premier post',
@@ -410,31 +417,31 @@ const generateTestData = async () => {
     'Réflexion du jour',
     'News importante',
     'Question pour vous',
-    'Partage d\'expérience',
+    "Partage d'expérience",
     'Conseil utile',
-    'Actualité tech'
+    'Actualité tech',
   ]
 
   const contents = [
     'Ceci est le contenu du post numéro',
     'Je voudrais partager avec vous',
     'Vous pensez quoi de',
-    'Récemment j\'ai découvert',
+    "Récemment j'ai découvert",
     'Pourquoi ne pas essayer',
     'Voici mon avis sur',
     'Important à savoir',
-    'Fait intéressant'
+    'Fait intéressant',
   ]
 
   const commentTexts = [
     'Super post !',
     'Très intéressant',
-    'Je suis d\'accord',
+    "Je suis d'accord",
     'À découvrir absolument',
     'Merci pour le partage',
     'Excellent conseil',
-    'C\'est vrai !',
-    'Bien dit'
+    "C'est vrai !",
+    'Bien dit',
   ]
 
   // ===== ÉTAPE 1 : CRÉER ET SAUVEGARDER LES POSTS =====
@@ -451,7 +458,7 @@ const generateTestData = async () => {
       content: contents[i % contents.length] + ' ' + i,
       likes: Math.floor(Math.random() * 50),
       creation_date: new Date(Date.now() - Math.random() * 7 * 24 * 60 * 60 * 1000).toISOString(),
-      updated_date: new Date().toISOString()
+      updated_date: new Date().toISOString(),
     }
 
     try {
@@ -462,22 +469,22 @@ const generateTestData = async () => {
     }
   }
 
-  console.log('=> ' + postIds.length + ' posts créés');
+  console.log('=> ' + postIds.length + ' posts créés')
 
   // ===== ÉTAPE 2 : CRÉER ET SAUVEGARDER LES COMMENTAIRES INDÉPENDANTS =====
   let totalComments = 0
 
   for (let i = 0; i < postIds.length; i++) {
-    const nbComments = Math.floor(Math.random() * 5)  // Entre 0 et 4 commentaires
+    const nbComments = Math.floor(Math.random() * 5) // Entre 0 et 4 commentaires
 
     for (let j = 0; j < nbComments; j++) {
       const comment: Comment = {
         _id: `comment_${Date.now()}_${Math.random()}`,
-        postId: postIds[i]!,                   // ← Référence au post créé
+        postId: postIds[i]!, // ← Référence au post créé
         content: commentTexts[Math.floor(Math.random() * commentTexts.length)]!,
         author: 'Toi',
         type: 'comment',
-        creation_date: new Date(Date.now() - Math.random() * 7 * 24 * 60 * 60 * 1000).toISOString()
+        creation_date: new Date(Date.now() - Math.random() * 7 * 24 * 60 * 60 * 1000).toISOString(),
       }
 
       try {
@@ -489,18 +496,18 @@ const generateTestData = async () => {
     }
   }
 
-  console.log('=> ' + totalComments + ' commentaires créés');
-  console.log('=> Génération terminée');
+  console.log('=> ' + totalComments + ' commentaires créés')
+  console.log('=> Génération terminée')
   fetchData()
 }
 
 // ===== SUPPRIMER TOUS LES POSTS =====
 const deleteAllPosts = async () => {
   if (!confirm('Êtes-vous sûr ? Tous les posts seront supprimés !')) {
-    return;
+    return
   }
 
-  console.log('=> Suppression définitive de tous les posts...');
+  console.log('=> Suppression définitive de tous les posts...')
 
   try {
     // Supprimer la base de données locale COMPLÈTEMENT
@@ -512,7 +519,7 @@ const deleteAllPosts = async () => {
     // Attendre que les indexes soient créés
     await createIndexes()
 
-    console.log('Tous les posts supprimés');
+    console.log('Tous les posts supprimés')
     postsData.value = []
   } catch (err: any) {
     console.error('Erreur suppression posts:', err)
@@ -520,10 +527,8 @@ const deleteAllPosts = async () => {
 }
 
 const searchReset = () => {
-  const searchInput = document.querySelector(".search") as HTMLInputElement
-  if (searchInput) {
-    searchInput.value = ""
-  }
+  const searchInput = document.querySelector('.search') as HTMLInputElement
+  if (searchInput) searchInput.value = ''
   fetchData()
 }
 
@@ -531,38 +536,62 @@ const toggle = () => {
   if (sync.value) {
     sync.value.cancel()
     sync.value = null
-    syncStatus.value = '⏸️ Synchronisation arrêtée'
+    offlineMode.value = true
+    syncStatus.value = '📵 Mode hors ligne (simulation)'
     isOnline.value = false
-    console.log('=> Sync arrêtée')
+    offlineChanges.value = 0
+    console.log('=> Sync arrêtée - Mode hors ligne activé')
   } else {
+    // Réactiver la sync
+    offlineMode.value = false
+    offlineChanges.value = 0
+    syncStatus.value = '🔄 Reconnexion...'
     syncData()
+    console.log('=> Mode hors ligne désactivé - Sync réactivée')
+  }
+}
+
+// ===== MODE HORS LIGNE (SIMULATION VIA TOGGLE) =====
+const trackLocalChange = () => {
+  if (offlineMode.value) {
+    offlineChanges.value++
+    console.log('=> Changement local enregistré (non synchronisé):', offlineChanges.value)
   }
 }
 </script>
 
 <template>
   <h1>Fetch Data</h1>
-  
+
   <!-- STATUT DE RÉPLICATION -->
   <div class="replication-status">
     <p>{{ replicationStatus }}</p>
   </div>
-  
+
   <div>
-    <label v-if="isOnline" style="color: green; font-weight: bold;">
+    <label v-if="!offlineMode && isOnline" style="color: green; font-weight: bold">
       🟢 {{ syncStatus }}
     </label>
-    <label v-else style="color: red; font-weight: bold;">
-      🔴 {{ syncStatus }}
+    <label v-else-if="offlineMode" style="color: #ff6b6b; font-weight: bold">
+      {{ syncStatus }}
     </label>
+    <label v-else style="color: red; font-weight: bold"> 🔴 {{ syncStatus }} </label>
     <input @click="toggle" type="checkbox" name="toggleSync" :checked="sync != null" />
     <label for="toggleSync">Toggle Sync</label>
-    <span v-if="lastSyncTime" style="font-size: 0.9em; color: #999;">
+
+    <span v-if="lastSyncTime && !offlineMode" style="font-size: 0.9em; color: #999">
       (Dernière sync: {{ lastSyncTime }})
+    </span>
+
+    <span
+      v-if="offlineMode && offlineChanges > 0"
+      style="font-size: 0.9em; color: #ff6b6b; font-weight: bold"
+    >
+      | ⚠️ {{ offlineChanges }} changement(s) en attente
     </span>
   </div>
   <div>
-    <input type="text" placeholder="Search" @keyup.enter="search" class="search">
+    <input type="text" placeholder="Search" @keyup.enter="search" class="search" />
     <button @click="searchReset">✕ Réinitialiser</button>
     <button @click="sortByLikes" class="btn-sort">📊 Trier par likes</button>
   </div>
@@ -570,17 +599,12 @@ const toggle = () => {
   <!-- SECTION CRÉATION POST -->
   <div class="create-section">
     <h2>📝 Créer un post</h2>
-    <input
-      type="text"
-      class="input-title"
-      placeholder="Titre du post"
-    >
-    <textarea
-      class="input-content"
-      placeholder="Contenu du post"
-    ></textarea>
+    <input type="text" class="input-title" placeholder="Titre du post" />
+    <textarea class="input-content" placeholder="Contenu du post"></textarea>
     <button @click="createDoc" class="btn-primary">➕ Ajouter un post</button>
-    <button @click="generateTestData" class="btn-secondary">🧪 Générer données test (15 posts)</button>
+    <button @click="generateTestData" class="btn-secondary">
+      🧪 Générer données test (15 posts)
+    </button>
     <button @click="deleteAllPosts" class="btn-danger">🗑️ Supprimer tous les posts</button>
   </div>
 
@@ -596,9 +620,7 @@ const toggle = () => {
     </div>
 
     <!-- BOUTON LIKES -->
-    <button @click="toggleLike(post)" class="btn-like">
-      👍 {{ post.likes }} likes
-    </button>
+    <button @click="toggleLike(post)" class="btn-like">👍 {{ post.likes }} likes</button>
 
     <!-- SECTION COMMENTAIRES -->
     <div class="comments-section">
@@ -615,10 +637,8 @@ const toggle = () => {
           :class="`comment-input-${post._id}`"
           placeholder="Ajouter un commentaire"
           class="comment-input"
-        >
-        <button @click="addComment(post)" class="btn-comment">
-          💬 Commenter
-        </button>
+        />
+        <button @click="addComment(post)" class="btn-comment">💬 Commenter</button>
       </div>
     </div>
   </article>
@@ -665,7 +685,7 @@ p {
 }
 
 /* ===== INPUTS ===== */
-input[type="text"],
+input[type='text'],
 textarea {
   width: 100%;
   padding: 8px;
@@ -681,7 +701,7 @@ textarea {
   min-height: 60px;
 }
 
-input[type="checkbox"] {
+input[type='checkbox'] {
   margin-right: 5px;
 }
 
