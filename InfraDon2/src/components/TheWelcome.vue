@@ -29,7 +29,6 @@ const url = 'http://inoe.wenger:IWtramp54HEIG/@localhost:5984/infradon_inoe_db/'
 const opts = { live: true, retry: true };
 const postsData = ref<Post[]>([])
 const sync = ref();
-let counter = 0;
 
 onMounted(() => {
   console.log('=> Composant initialisé');
@@ -150,18 +149,43 @@ const fetchData = (): any => {
 }
 
 const createDoc = (): any => {
-  counter++
+  // Récupérer les valeurs des inputs
+  const titleInput = document.querySelector(".input-title") as HTMLInputElement
+  const contentInput = document.querySelector(".input-content") as HTMLInputElement
+
+  const title = titleInput?.value.trim()
+  const content = contentInput?.value.trim()
+
+  // Validation
+  if (!title || !content) {
+    console.warn('Titre et contenu sont obligatoires')
+    return
+  }
+
+  console.log('=> Création d\'un nouveau post');
+
+  const newPost: Post = {
+    _id: `post_${Date.now()}`,
+    type: 'post',
+    title: title,
+    content: content,
+    likes: 0,
+    comments: [],
+    creation_date: new Date().toISOString(),
+    updated_date: new Date().toISOString()
+  }
+
   storage.value
-    .post({
-      title: 'Document' + counter,
-      content: 'Contenu du document ',
-    })
-    .then(function (response: any) {
+    .post(newPost)
+    .then((response: any) => {
+      console.log('Post créé :', response)
+      // Vider les inputs
+      titleInput.value = ""
+      contentInput.value = ""
       fetchData()
-      console.log(response)
     })
-    .catch(function (err: any) {
-      console.log(err)
+    .catch((err: any) => {
+      console.error('Erreur création post :', err)
     })
 }
 
@@ -279,12 +303,28 @@ const deleteAllPosts = async () => {
     <input type="text" placeholder="Search" @keyup.enter="search" class="search">
     <button @click="searchReset">X</button>
   </div>
-  <div>
-    <button @click="createDoc">Ajouter un document</button>
-    <button @click="generateTestData">🧪 Générer données test (15 posts)</button>
+  
+  <!-- SECTION CRÉATION POST -->
+  <div style="background: #ecf0f1; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+    <h2>📝 Créer un post</h2>
+    <input 
+      type="text" 
+      class="input-title"
+      placeholder="Titre du post"
+      style="width: 100%; padding: 10px; margin-bottom: 10px; border: 1px solid #bdc3c7; border-radius: 5px;"
+    >
+    <textarea 
+      class="input-content"
+      placeholder="Contenu du post"
+      style="width: 100%; padding: 10px; margin-bottom: 10px; border: 1px solid #bdc3c7; border-radius: 5px; min-height: 80px;"
+    ></textarea>
+    <button @click="createDoc" style="background: #27ae60;">➕ Ajouter un post</button>
+    <button @click="generateTestData" style="background: #9b59b6;">🧪 Générer données test (15 posts)</button>
     <button @click="deleteAllPosts" style="background: #e74c3c;">🗑️ Supprimer tous les posts</button>
   </div>
-  <article v-for="post in postsData" v-bind:key="(post as any).id">
+
+  <!-- LISTE DES POSTS -->
+  <article v-for="post in postsData" v-bind:key="(post as any)._id">
     <h2>{{ post.title }}</h2>
     <p>{{ post.content }}</p>
     <p>👍 {{ post.likes }} likes</p>
