@@ -142,50 +142,63 @@ const sortByLikes = (): any => {
   console.log('=> Tri par nombre de likes');
 
   storage.value.find({
-    selector: { type: 'post' },
-    sort: [{ likes: 'desc' }]
+    selector: {
+      type: 'post',
+      likes: { $gte: 0 }  // ← Force l'utilisation de l'index
+    },
+    sort: [{ type: 'asc' }, { likes: 'desc' }]  // ← Trier par type PUIS par likes
   })
-  .then((result: any) => {
+  .then(async (result: any) => {
     console.log('=> Posts triés par likes :', result.docs.length)
-    postsData.value = result.docs as Post[]
+    const postsWithComments = await attachComments(result.docs)
+    postsData.value = postsWithComments as Post[]
   })
   .catch((error: any) => {
     console.error('Erreur lors du tri :', error)
   })
 }
 
-const fetchData = async (): Promise<any> => {
-  storage.value
-    .find({
-      selector: { type: 'post' }
-    })
-    .then(async (result: any) => {
-      console.log('=> Posts récupérés :', result.docs.length)
+const fetchData = async (posts?: Post[]): Promise<any> => {
+  // Si pas de posts en paramètre, récupérer les posts de la base
+  if (!posts) {
+    storage.value
+      .find({
+        selector: { type: 'post' }
+      })
+      .then(async (result: any) => {
+        console.log('=> Posts récupérés :', result.docs.length)
+        posts = result.docs as Post[]
 
-      // Pour CHAQUE post, récupérer ses commentaires
-      const postsWithComments = await Promise.all(
-        result.docs.map(async (post: Post) => {
-          // Récupérer tous les commentaires de ce post
-          const commentsResult = await storage.value.find({
-            selector: {
-              type: 'comment',
-              postId: post._id
-            }
-          })
+        // Ajouter les commentaires
+        const postsWithComments = await attachComments(posts)
+        postsData.value = postsWithComments as Post[]
+      })
+      .catch((error: any) => {
+        console.error('Erreur lors de la récupération des données :', error)
+      })
+  }
+}
 
-          // Ajouter les commentaires au post pour l'affichage
-          return {
-            ...post,
-            comments: commentsResult.docs as Comment[]
-          }
-        })
-      )
-
-      postsData.value = postsWithComments as Post[]
+// Fonction utilitaire pour ajouter les commentaires aux posts
+const attachComments = async (posts: Post[]): Promise<Post[]> => {
+  const postsWithComments: Post[] = []
+  
+  // Boucle séquentielle pour préserver l'ordre
+  for (const post of posts) {
+    const commentsResult = await storage.value.find({
+      selector: {
+        type: 'comment',
+        postId: post._id
+      }
     })
-    .catch((error: any) => {
-      console.error('Erreur lors de la récupération des données :', error)
+    
+    postsWithComments.push({
+      ...post,
+      comments: commentsResult.docs as Comment[]
     })
+  }
+  
+  return postsWithComments
 }
 
 const createDoc = (): any => {
