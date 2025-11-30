@@ -45,9 +45,13 @@ const initDatabase = () => {
     // Créer les indexes
     createIndexes()
 
+    // Répliquer PUIS chercher les données
     localdb.replicate.from(url)
-    .on('complete', syncData)
-    fetchData()
+    .on('complete', () => {
+      console.log('Réplication complète')
+      fetchData()  // ← Une seule fois après réplication
+      syncData()   // ← Puis démarrer la sync continue
+    })
   } else {
     console.warn('Something went wrong')
   }
@@ -139,8 +143,7 @@ const searchReset = () => {
 const fetchData = (): any => {
   storage.value
     .find({
-      selector: { type: 'post' },
-      sort: [{ creation_date: 'desc' }]
+      selector: { type: 'post' }
     })
     .then((result: any) => {
       console.log('=> Posts récupérés :', result.docs.length)
@@ -192,28 +195,49 @@ const createDoc = (): any => {
     })
 }
 
-const deleteDoc = (post: any): any => {
+const deleteDoc = (post: Post): any => {
+  console.log('=> Suppression du post:', post._id);
+
   storage.value
     .remove(post)
-    .then(function (response: any) {
+    .then((response: any) => {
+      console.log('Post supprimé :', response)
       fetchData()
-      console.log(response)
     })
-    .catch(function (err: any) {
-      console.log(err)
+    .catch((err: any) => {
+      console.error('Erreur suppression post :', err)
     })
 }
 
-const updateDoc = (post: any): any => {
-  post.content = post.content + ' (modifié)'
+const updateDoc = (post: Post): any => {
+  // Récupérer les nouvelles valeurs
+  const newTitle = prompt('Nouveau titre:', post.title)
+  if (newTitle === null) return  // Annulation
+
+  const newContent = prompt('Nouveau contenu:', post.content)
+  if (newContent === null) return  // Annulation
+
+  // Validation
+  if (!newTitle.trim() || !newContent.trim()) {
+    console.warn('Titre et contenu sont obligatoires')
+    return
+  }
+
+  console.log('=> Modification du post:', post._id);
+
+  // Modifier le post
+  post.title = newTitle.trim()
+  post.content = newContent.trim()
+  post.updated_date = new Date().toISOString()
+
   storage.value
     .put(post)
     .then((response: any) => {
+      console.log('Post modifié :', response)
       fetchData()
-      console.log(response)
     })
     .catch((err: any) => {
-      console.log(err)
+      console.error('Erreur modification post :', err)
     })
 }
 
@@ -306,17 +330,17 @@ const deleteAllPosts = async () => {
     <input type="text" placeholder="Search" @keyup.enter="search" class="search">
     <button @click="searchReset">X</button>
   </div>
-  
+
   <!-- SECTION CRÉATION POST -->
   <div style="background: #ecf0f1; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
     <h2>📝 Créer un post</h2>
-    <input 
-      type="text" 
+    <input
+      type="text"
       class="input-title"
       placeholder="Titre du post"
       style="width: 100%; padding: 10px; margin-bottom: 10px; border: 1px solid #bdc3c7; border-radius: 5px;"
     >
-    <textarea 
+    <textarea
       class="input-content"
       placeholder="Contenu du post"
       style="width: 100%; padding: 10px; margin-bottom: 10px; border: 1px solid #bdc3c7; border-radius: 5px; min-height: 80px;"
