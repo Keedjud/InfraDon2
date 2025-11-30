@@ -410,10 +410,14 @@ const deleteAllPosts = async () => {
   <article v-for="post in postsData" v-bind:key="(post as any)._id" class="post-card">
     <h2>{{ post.title }}</h2>
     <p>{{ post.content }}</p>
+
+    <!-- BOUTONS D'ACTIONS POST -->
     <div class="post-actions">
-      <button @click="deleteDoc(post)" class="btn-small">Supprimer le document</button>
-      <button @click="updateDoc(post)" class="btn-small">Modifier le document</button>
+      <button @click="updateDoc(post)" class="btn-small">✏️ Modifier</button>
+      <button @click="deleteDoc(post)" class="btn-small-danger">🗑️ Supprimer</button>
     </div>
+
+    <!-- BOUTON LIKES -->
     <button @click="toggleLike(post)" class="btn-like">
       👍 {{ post.likes }} likes
     </button>
@@ -456,44 +460,46 @@ const deleteAllPosts = async () => {
 }
 
 /* ===== GÉNÉRIQUES ===== */
+body {
+  font-family: Arial, sans-serif;
+  background-color: #f9f9f9;
+  padding: 20px;
+}
+
 h1 {
   text-align: center;
-  color: #2c3e50;
-  margin-bottom: 20px;
+  color: #333;
 }
 
 h2 {
-  color: #34495e;
+  color: #333;
   margin-top: 0;
 }
 
 h3 {
-  color: #34495e;
-  font-size: 1.1em;
-  margin-bottom: 10px;
+  color: #333;
+  font-size: 1em;
 }
 
 p {
-  color: #34495e;
-  line-height: 1.6;
+  color: #555;
 }
 
 /* ===== INPUTS ===== */
 input[type="text"],
-textarea,
-.comment-input {
+textarea {
   width: 100%;
-  padding: 10px;
-  margin-bottom: 10px;
-  border: 1px solid var(--border-color);
-  border-radius: 5px;
-  font-family: Arial, sans-serif;
+  padding: 8px;
+  margin-bottom: 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
   box-sizing: border-box;
+  font-family: Arial, sans-serif;
 }
 
 textarea {
   resize: vertical;
-  min-height: 80px;
+  min-height: 60px;
 }
 
 input[type="checkbox"] {
@@ -502,137 +508,89 @@ input[type="checkbox"] {
 
 /* ===== BOUTONS ===== */
 button {
-  padding: 10px 12px;
+  padding: 8px 12px;
   border: none;
-  border-radius: 5px;
+  border-radius: 4px;
   cursor: pointer;
-  font-weight: bold;
-  transition: background-color 0.3s;
-  margin-right: 10px;
-  margin-bottom: 10px;
-}
-
-.btn-primary {
-  background-color: var(--success);
+  background-color: #007bff;
   color: white;
+  margin-right: 5px;
+  margin-bottom: 8px;
 }
 
-.btn-primary:hover {
-  background-color: #229954;
-}
-
-.btn-secondary {
-  background-color: var(--secondary);
-  color: white;
-}
-
-.btn-secondary:hover {
-  background-color: #8e44ad;
+button:hover {
+  background-color: #0056b3;
 }
 
 .btn-danger {
-  background-color: var(--danger);
-  color: white;
+  background-color: #dc3545;
 }
 
 .btn-danger:hover {
-  background-color: #c0392b;
-}
-
-.btn-like {
-  background-color: var(--warning);
-  color: white;
-  padding: 8px 12px;
-}
-
-.btn-like:hover {
-  background-color: #e67e22;
-}
-
-.btn-small {
-  background-color: var(--primary);
-  color: white;
-  padding: 6px 10px;
-  font-size: 0.9em;
-  margin-right: 5px;
-}
-
-.btn-small:hover {
-  background-color: var(--primary-dark);
-}
-
-.btn-comment {
-  background-color: var(--primary);
-  color: white;
-  padding: 8px 12px;
-}
-
-.btn-comment:hover {
-  background-color: var(--primary-dark);
+  background-color: #c82333;
 }
 
 /* ===== SECTIONS ===== */
 .create-section {
-  background-color: var(--light-bg);
-  padding: 20px;
-  border-radius: 8px;
-  margin-bottom: 20px;
+  background-color: #f0f0f0;
+  padding: 15px;
+  border-radius: 4px;
+  margin-bottom: 15px;
 }
 
 .post-card {
   background: white;
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  padding: 20px;
-  margin-bottom: 20px;
-  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 15px;
+  margin-bottom: 15px;
 }
 
 .post-actions {
-  margin: 15px 0;
+  margin: 10px 0;
   padding-bottom: 10px;
-  border-bottom: 1px solid var(--light-bg);
 }
 
-/* ===== SECTION COMMENTAIRES ===== */
+/* ===== COMMENTAIRES ===== */
 .comments-section {
-  background-color: var(--light-bg);
-  padding: 15px;
-  margin-top: 15px;
-  border-radius: 5px;
+  background-color: #f9f9f9;
+  padding: 12px;
+  margin-top: 12px;
+  border-radius: 4px;
+  border: 1px solid #eee;
 }
 
 .comment {
   background-color: white;
-  padding: 12px;
-  margin-bottom: 10px;
-  border-left: 4px solid var(--primary);
+  padding: 10px;
+  margin-bottom: 8px;
+  border-left: 3px solid #007bff;
   border-radius: 3px;
 }
 
 .comment strong {
-  color: #2c3e50;
+  color: #333;
 }
 
 .comment-date {
   font-size: 0.85em;
-  color: var(--text-muted);
+  color: #999;
   margin-left: 5px;
 }
 
 .comment p {
-  margin: 8px 0 0 0;
-  color: #34495e;
+  margin: 5px 0 0 0;
+  color: #555;
 }
 
 .comment-input-wrapper {
   display: flex;
-  gap: 10px;
-  margin-top: 10px;
+  gap: 8px;
+  margin-top: 8px;
 }
 
 .comment-input {
   flex: 1;
-  margin-bottom: 0;
+  margin-bottom: 0 !important;
 }
 </style>
