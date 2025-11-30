@@ -21,7 +21,7 @@ declare interface Post {
   title: string
   content: string
   likes: number
-  // ← SUPPRIMÉ : comments: Comment[]
+  comments?: Comment[]
   creation_date: string
   updated_date: string
 }
@@ -37,88 +37,51 @@ onMounted(() => {
   initDatabase()
 });
 
-const initDatabase = () => {
+const initDatabase = async () => {
   console.log('=> Connexion à la base de données');
   const localdb = new PouchDB('local')
   if (localdb) {
     console.log("Connected to collection : " + localdb?.name)
     storage.value = localdb
 
-    // Créer les indexes
-    createIndexes()
+    // Créer les indexes ET ATTENDRE
+    await createIndexes()
 
-    // Répliquer PUIS chercher les données
     localdb.replicate.from(url)
     .on('complete', () => {
       console.log('Réplication complète')
-      fetchData()  // ← Une seule fois après réplication
-      syncData()   // ← Puis démarrer la sync continue
+      fetchData()
+      syncData()
     })
   } else {
     console.warn('Something went wrong')
   }
 }
 
-const createIndexes = () => {
+const createIndexes = async () => {
   console.log('=> Création des indexes');
 
-  // ===== INDEXES POUR LES POSTS =====
+  try {
+    await storage.value.createIndex({ index: { fields: ['title'] } })
+    console.log("Index 'title' créé")
 
-  // Index sur le titre (pour la recherche dans les posts)
-  storage.value.createIndex({
-    index: {
-      fields: ['title']
-    }
-  })
-  .then(() => console.log("Index 'title' créé"))
-  .catch((err: any) => console.error("Erreur index title:", err))
+    await storage.value.createIndex({ index: { fields: ['content'] } })
+    console.log("Index 'content' créé")
 
-  // Index sur le contenu (pour la recherche dans les posts)
-  storage.value.createIndex({
-    index: {
-      fields: ['content']
-    }
-  })
-  .then(() => console.log("Index 'content' créé"))
-  .catch((err: any) => console.error("Erreur index content:", err))
+    await storage.value.createIndex({ index: { fields: ['type'] } })
+    console.log("Index 'type' créé")
 
-  // Index sur le type (pour filtrer uniquement les posts)
-  storage.value.createIndex({
-    index: {
-      fields: ['type']
-    }
-  })
-  .then(() => console.log("Index 'type' créé"))
-  .catch((err: any) => console.error("Erreur index type:", err))
+    await storage.value.createIndex({ index: { fields: ['type', 'likes'] } })
+    console.log("Index 'type + likes' créé")
 
-  // Index composé sur type et likes (pour le tri par likes)
-  storage.value.createIndex({
-    index: {
-      fields: ['type', 'likes']
-    }
-  })
-  .then(() => console.log("Index 'type + likes' créé"))
-  .catch((err: any) => console.error("Erreur index type+likes:", err))
+    await storage.value.createIndex({ index: { fields: ['postId'] } })
+    console.log("Index 'postId' créé")
 
-  // ===== INDEXES POUR LES COMMENTAIRES =====
-
-  // Index sur postId (pour retrouver tous les commentaires d'un post)
-  storage.value.createIndex({
-    index: {
-      fields: ['postId']
-    }
-  })
-  .then(() => console.log("Index 'postId' créé"))
-  .catch((err: any) => console.error("Erreur index postId:", err))
-
-  // Index composé sur type et postId (pour filtrer les commentaires d'un post)
-  storage.value.createIndex({
-    index: {
-      fields: ['type', 'postId']
-    }
-  })
-  .then(() => console.log("✓ Index 'type + postId' créé"))
-  .catch((err: any) => console.error("Erreur index type+postId:", err))
+    await storage.value.createIndex({ index: { fields: ['type', 'postId'] } })
+    console.log("Index 'type + postId' créé")
+  } catch (err: any) {
+    console.error('Erreur création indexes:', err)
+  }
 }
 
 const syncData = () => {
@@ -191,14 +154,34 @@ const sortByLikes = (): any => {
   })
 }
 
-const fetchData = (): any => {
+const fetchData = async (): Promise<any> => {
   storage.value
     .find({
       selector: { type: 'post' }
     })
-    .then((result: any) => {
+    .then(async (result: any) => {
       console.log('=> Posts récupérés :', result.docs.length)
-      postsData.value = result.docs as Post[]
+
+      // Pour CHAQUE post, récupérer ses commentaires
+      const postsWithComments = await Promise.all(
+        result.docs.map(async (post: Post) => {
+          // Récupérer tous les commentaires de ce post
+          const commentsResult = await storage.value.find({
+            selector: {
+              type: 'comment',
+              postId: post._id
+            }
+          })
+
+          // Ajouter les commentaires au post pour l'affichage
+          return {
+            ...post,
+            comments: commentsResult.docs as Comment[]
+          }
+        })
+      )
+
+      postsData.value = postsWithComments as Post[]
     })
     .catch((error: any) => {
       console.error('Erreur lors de la récupération des données :', error)
@@ -327,53 +310,39 @@ const addComment = (post: Post): any => {
   // Créer le nouveau commentaire
   const newComment: Comment = {
     _id: `comment_${Date.now()}`,
-    postId: post._id,          // ← Référence au post
+    postId: post._id,              // ← Référence au post
     content: commentContent,
     author: 'Toi',
-    type: 'comment',          // ← Type commentaire
+    type: 'comment',               // ← Type commentaire
     creation_date: new Date().toISOString()
   }
 
-  // Ajouter le commentaire au post
-  post.updated_date = new Date().toISOString()
-
-  // Sauvegarder le post modifié
+  // Sauvegarder le commentaire comme DOCUMENT INDÉPENDANT
   storage.value
-    .put(post)
+    .post(newComment)
     .then((response: any) => {
       console.log('Commentaire ajouté :', response)
       commentInput.value = ""  // Vider l'input
-      fetchData()
+      fetchData()              // Récupérer et afficher les posts avec leurs commentaires
     })
     .catch((err: any) => {
       console.error('Erreur ajout commentaire :', err)
     })
 }
 
-const deleteComment = (post: Post, commentId: string): any => {
-  console.log('=> Suppression du commentaire:', commentId);
+const deleteComment = (post: Post, comment: Comment): any => {
+  console.log('=> Suppression du commentaire:', comment._id);
 
-  // Trouver l'index du commentaire
-  const index = post.comments.findIndex(c => c._id === commentId)
-
-  // Si trouvé, le supprimer
-  if (index > -1) {
-    post.comments.splice(index, 1)
-    post.updated_date = new Date().toISOString()
-
-    // Sauvegarder le post modifié
-    storage.value
-      .put(post)
-      .then((response: any) => {
-        console.log('✓ Commentaire supprimé :', response)
-        fetchData()
-      })
-      .catch((err: any) => {
-        console.error('Erreur suppression commentaire :', err)
-      })
-  } else {
-    console.warn('Commentaire non trouvé')
-  }
+  // Supprimer le commentaire comme DOCUMENT INDÉPENDANT
+  storage.value
+    .remove(comment)
+    .then((response: any) => {
+      console.log('Commentaire supprimé :', response)
+      fetchData()  // Récupérer et afficher les posts avec leurs commentaires
+    })
+    .catch((err: any) => {
+      console.error('Erreur suppression commentaire :', err)
+    })
 }
 
 // ===== FACTORY - GÉNÉRER DONNÉES TEST =====
@@ -413,25 +382,15 @@ const generateTestData = async () => {
     'Bien dit'
   ]
 
-  for (let i = 0; i < 15; i++) {
-    // Créer des commentaires pour ce post
-    const comments: Comment[] = []
-    const nbComments = Math.floor(Math.random() * 5)  // Entre 0 et 4 commentaires
+  // ===== ÉTAPE 1 : CRÉER ET SAUVEGARDER LES POSTS =====
+  const postIds: string[] = []
 
-    for (let j = 0; j < nbComments; j++) {
-      const comment: Comment = {
-        _id: `comment_${i}_${j}_${Date.now()}`,
-        postId: `post_test_${i}_${Date.now()}`,  // ← Référence au post
-        content: commentTexts[Math.floor(Math.random() * commentTexts.length)] ?? 'Super post !',
-        author: 'Toi',
-        type: 'comment',          // ← Type commentaire
-        creation_date: new Date(Date.now() - Math.random() * 7 * 24 * 60 * 60 * 1000).toISOString()
-      }
-      comments.push(comment)
-    }
+  for (let i = 0; i < 15; i++) {
+    const postId = `post_test_${i}_${Date.now()}`
+    postIds.push(postId)
 
     const post: Post = {
-      _id: `post_test_${i}_${Date.now()}`,
+      _id: postId,
       type: 'post',
       title: titles[i % titles.length] + ' ' + i,
       content: contents[i % contents.length] + ' ' + i,
@@ -442,12 +401,40 @@ const generateTestData = async () => {
 
     try {
       await storage.value.post(post)
-      console.log('Post ' + i + ' créé avec ' + nbComments + ' commentaires')
+      console.log('Post ' + i + ' créé')
     } catch (err: any) {
       console.error('Erreur création post test:', err)
     }
   }
 
+  console.log('=> ' + postIds.length + ' posts créés');
+
+  // ===== ÉTAPE 2 : CRÉER ET SAUVEGARDER LES COMMENTAIRES INDÉPENDANTS =====
+  let totalComments = 0
+
+  for (let i = 0; i < postIds.length; i++) {
+    const nbComments = Math.floor(Math.random() * 5)  // Entre 0 et 4 commentaires
+
+    for (let j = 0; j < nbComments; j++) {
+      const comment: Comment = {
+        _id: `comment_${Date.now()}_${Math.random()}`,
+        postId: postIds[i]!,                   // ← Référence au post créé
+        content: commentTexts[Math.floor(Math.random() * commentTexts.length)]!,
+        author: 'Toi',
+        type: 'comment',
+        creation_date: new Date(Date.now() - Math.random() * 7 * 24 * 60 * 60 * 1000).toISOString()
+      }
+
+      try {
+        await storage.value.post(comment)
+        totalComments++
+      } catch (err: any) {
+        console.error('Erreur création commentaire test:', err)
+      }
+    }
+  }
+
+  console.log('=> ' + totalComments + ' commentaires créés');
   console.log('=> Génération terminée');
   fetchData()
 }
@@ -467,8 +454,8 @@ const deleteAllPosts = async () => {
     // Recréer une base vide
     storage.value = new PouchDB('local')
 
-    // Recréer les indexes
-    createIndexes()
+    // Attendre que les indexes soient créés
+    await createIndexes()
 
     console.log('Tous les posts supprimés');
     postsData.value = []
@@ -528,12 +515,12 @@ const deleteAllPosts = async () => {
 
     <!-- SECTION COMMENTAIRES -->
     <div class="comments-section">
-      <h3>💬 Commentaires ({{ post.comments.length }})</h3>
+      <h3>💬 Commentaires ({{ (post.comments ?? []).length }})</h3>
       <div v-for="comment in post.comments" :key="comment._id" class="comment">
         <strong>{{ comment.author }}</strong>
         <span class="comment-date">({{ new Date(comment.creation_date).toLocaleString() }})</span>
         <p>{{ comment.content }}</p>
-        <button @click="deleteComment(post, comment._id)" class="btn-comment-delete">X</button>
+        <button @click="deleteComment(post, comment)" class="btn-comment-delete">✕</button>
       </div>
       <div class="comment-input-wrapper">
         <input
