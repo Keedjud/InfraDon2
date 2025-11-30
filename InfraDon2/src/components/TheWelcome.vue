@@ -78,15 +78,6 @@ const createIndexes = () => {
   .then(() => console.log("Index 'content' créé"))
   .catch((err: any) => console.error("Erreur index content:", err))
 
-  // Index sur le nombre de likes (pour le tri)
-  storage.value.createIndex({
-    index: {
-      fields: ['likes']
-    }
-  })
-  .then(() => console.log("Index 'likes' créé"))
-  .catch((err: any) => console.error("Erreur index likes:", err))
-
   // Index sur le type (pour filtrer uniquement les posts)
   storage.value.createIndex({
     index: {
@@ -95,6 +86,15 @@ const createIndexes = () => {
   })
   .then(() => console.log("Index 'type' créé"))
   .catch((err: any) => console.error("Erreur index type:", err))
+
+  // Index composé sur type et likes (pour le tri par likes)
+  storage.value.createIndex({
+    index: {
+      fields: ['type', 'likes']
+    }
+  })
+  .then(() => console.log("Index 'type + likes' créé"))
+  .catch((err: any) => console.error("Erreur index type+likes:", err))
 }
 
 const syncData = () => {
@@ -148,6 +148,23 @@ const searchReset = () => {
     searchInput.value = ""
   }
   fetchData()
+}
+
+// ===== TRI PAR LIKES =====
+const sortByLikes = (): any => {
+  console.log('=> Tri par nombre de likes');
+
+  storage.value.find({
+    selector: { type: 'post' },
+    sort: [{ likes: 'desc' }]
+  })
+  .then((result: any) => {
+    console.log('=> Posts triés par likes :', result.docs.length)
+    postsData.value = result.docs as Post[]
+  })
+  .catch((error: any) => {
+    console.error('Erreur lors du tri :', error)
+  })
 }
 
 const fetchData = (): any => {
@@ -447,7 +464,8 @@ const deleteAllPosts = async () => {
   </div>
   <div>
     <input type="text" placeholder="Search" @keyup.enter="search" class="search">
-    <button @click="searchReset">X</button>
+    <button @click="searchReset">✕ Réinitialiser</button>
+    <button @click="sortByLikes" class="btn-sort">📊 Trier par likes</button>
   </div>
 
   <!-- SECTION CRÉATION POST -->
