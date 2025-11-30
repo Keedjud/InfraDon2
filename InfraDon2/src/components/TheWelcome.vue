@@ -325,21 +325,46 @@ const generateTestData = async () => {
     'Fait intéressant'
   ]
 
+  const commentTexts = [
+    'Super post !',
+    'Très intéressant',
+    'Je suis d\'accord',
+    'À découvrir absolument',
+    'Merci pour le partage',
+    'Excellent conseil',
+    'C\'est vrai !',
+    'Bien dit'
+  ]
+
   for (let i = 0; i < 15; i++) {
+    // Créer des commentaires pour ce post
+    const comments: Comment[] = []
+    const nbComments = Math.floor(Math.random() * 5)  // Entre 0 et 4 commentaires
+
+    for (let j = 0; j < nbComments; j++) {
+      const comment: Comment = {
+        _id: `comment_${i}_${j}_${Date.now()}`,
+        content: commentTexts[Math.floor(Math.random() * commentTexts.length)] ?? 'Super post !',
+        author: 'Toi',
+        creation_date: new Date(Date.now() - Math.random() * 7 * 24 * 60 * 60 * 1000).toISOString()
+      }
+      comments.push(comment)
+    }
+
     const post: Post = {
       _id: `post_test_${i}_${Date.now()}`,
       type: 'post',
       title: titles[i % titles.length] + ' ' + i,
       content: contents[i % contents.length] + ' ' + i,
       likes: Math.floor(Math.random() * 50),
-      comments: [],
+      comments: comments,
       creation_date: new Date(Date.now() - Math.random() * 7 * 24 * 60 * 60 * 1000).toISOString(),
       updated_date: new Date().toISOString()
     }
 
     try {
       await storage.value.post(post)
-      console.log('Post ' + i + ' créé')
+      console.log('Post ' + i + ' créé avec ' + nbComments + ' commentaires')
     } catch (err: any) {
       console.error('Erreur création post test:', err)
     }
