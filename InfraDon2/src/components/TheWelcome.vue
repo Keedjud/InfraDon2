@@ -26,6 +26,7 @@ declare interface Post {
   updated_date: string
 }
 
+// ===== VARIABLES =====
 const storage = ref()
 const url = 'http://inoe.wenger:IWtramp54HEIG/@localhost:5984/infradon_inoe_db/'
 const opts = { live: true, retry: true }
