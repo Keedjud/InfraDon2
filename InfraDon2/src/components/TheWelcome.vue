@@ -115,21 +115,31 @@ const toggle = () => {
 const search = (event: any) => {
   event.target.blur()
 
-  if (event.target.value === "") {
-    fetchData();
-  } else {
-    storage.value.find({
-      selector: {content: `Contenu du document : ${event.target.value}`}
-    })
-    .then((result: any) => {
-      console.log('=> Données récupérées :', result.docs)
-      postsData.value = result.docs
-      // console.log(postsData)
-    })
-    .catch((error: any) => {
-      console.error('Erreur lors de la récupération des données :', error)
-    })
+  const query = event.target.value.trim()
+
+  if (query === "") {
+    fetchData()
+    return
   }
+
+  console.log('=> Recherche sur :', query);
+
+  storage.value.find({
+    selector: {
+      type: 'post',
+      $or: [
+        { title: { $regex: query } },
+        { content: { $regex: query } }
+      ]
+    }
+  })
+  .then((result: any) => {
+    console.log('=> Résultats trouvés :', result.docs.length)
+    postsData.value = result.docs as Post[]
+  })
+  .catch((error: any) => {
+    console.error('Erreur lors de la recherche :', error)
+  })
 }
 
 const searchReset = () => {
