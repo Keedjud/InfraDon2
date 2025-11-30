@@ -193,7 +193,7 @@ const updateDoc = (post: any): any => {
 // ===== FACTORY - GÉNÉRER DONNÉES TEST =====
 const generateTestData = async () => {
   console.log('=> Génération des données de test...');
-  
+
   const titles = [
     'Mon premier post',
     'Découverte intéressante',
@@ -230,7 +230,7 @@ const generateTestData = async () => {
 
     try {
       await storage.value.post(post)
-      console.log('✓ Post ' + i + ' créé')
+      console.log('Post ' + i + ' créé')
     } catch (err: any) {
       console.error('Erreur création post test:', err)
     }
