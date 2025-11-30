@@ -62,7 +62,9 @@ const initDatabase = () => {
 const createIndexes = () => {
   console.log('=> Création des indexes');
 
-  // Index sur le titre (pour la recherche)
+  // ===== INDEXES POUR LES POSTS =====
+
+  // Index sur le titre (pour la recherche dans les posts)
   storage.value.createIndex({
     index: {
       fields: ['title']
@@ -71,7 +73,7 @@ const createIndexes = () => {
   .then(() => console.log("Index 'title' créé"))
   .catch((err: any) => console.error("Erreur index title:", err))
 
-  // Index sur le contenu (pour la recherche)
+  // Index sur le contenu (pour la recherche dans les posts)
   storage.value.createIndex({
     index: {
       fields: ['content']
@@ -97,6 +99,26 @@ const createIndexes = () => {
   })
   .then(() => console.log("Index 'type + likes' créé"))
   .catch((err: any) => console.error("Erreur index type+likes:", err))
+
+  // ===== INDEXES POUR LES COMMENTAIRES =====
+
+  // Index sur postId (pour retrouver tous les commentaires d'un post)
+  storage.value.createIndex({
+    index: {
+      fields: ['postId']
+    }
+  })
+  .then(() => console.log("Index 'postId' créé"))
+  .catch((err: any) => console.error("Erreur index postId:", err))
+
+  // Index composé sur type et postId (pour filtrer les commentaires d'un post)
+  storage.value.createIndex({
+    index: {
+      fields: ['type', 'postId']
+    }
+  })
+  .then(() => console.log("✓ Index 'type + postId' créé"))
+  .catch((err: any) => console.error("Erreur index type+postId:", err))
 }
 
 const syncData = () => {
