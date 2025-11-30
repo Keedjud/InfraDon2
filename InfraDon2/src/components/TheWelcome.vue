@@ -241,6 +241,25 @@ const updateDoc = (post: Post): any => {
     })
 }
 
+// ===== SYSTÈME DE LIKES =====
+const toggleLike = (post: Post): any => {
+  console.log('=> Toggle like sur post:', post._id);
+
+  // Incrémenter le compteur
+  post.likes++
+  post.updated_date = new Date().toISOString()
+
+  storage.value
+    .put(post)
+    .then((response: any) => {
+      console.log('✓ Post liké :', response)
+      fetchData()
+    })
+    .catch((err: any) => {
+      console.error('Erreur modification like :', err)
+    })
+}
+
 // ===== FACTORY - GÉNÉRER DONNÉES TEST =====
 const generateTestData = async () => {
   console.log('=> Génération des données de test...');
@@ -354,8 +373,10 @@ const deleteAllPosts = async () => {
   <article v-for="post in postsData" v-bind:key="(post as any)._id">
     <h2>{{ post.title }}</h2>
     <p>{{ post.content }}</p>
-    <p>👍 {{ post.likes }} likes</p>
     <button @click="deleteDoc(post)">Supprimer le document</button>
     <button @click="updateDoc(post)">Modifier le document</button>
+    <button @click="toggleLike(post)" style="background: #f39c12; color: white; padding: 8px 12px; border: none; border-radius: 5px; cursor: pointer;">
+      👍 {{ post.likes }} likes
+    </button>
   </article>
 </template>
