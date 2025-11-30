@@ -130,7 +130,10 @@ const search = (event: any) => {
 }
 
 const searchReset = () => {
-  document.querySelector(".search").value = ""
+  const searchInput = document.querySelector(".search") as HTMLInputElement
+  if (searchInput) {
+    searchInput.value = ""
+  }
   fetchData()
 }
 
