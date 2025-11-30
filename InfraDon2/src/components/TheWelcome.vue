@@ -299,6 +299,32 @@ const addComment = (post: Post): any => {
     })
 }
 
+const deleteComment = (post: Post, commentId: string): any => {
+  console.log('=> Suppression du commentaire:', commentId);
+
+  // Trouver l'index du commentaire
+  const index = post.comments.findIndex(c => c._id === commentId)
+
+  // Si trouvé, le supprimer
+  if (index > -1) {
+    post.comments.splice(index, 1)
+    post.updated_date = new Date().toISOString()
+
+    // Sauvegarder le post modifié
+    storage.value
+      .put(post)
+      .then((response: any) => {
+        console.log('✓ Commentaire supprimé :', response)
+        fetchData()
+      })
+      .catch((err: any) => {
+        console.error('Erreur suppression commentaire :', err)
+      })
+  } else {
+    console.warn('Commentaire non trouvé')
+  }
+}
+
 // ===== FACTORY - GÉNÉRER DONNÉES TEST =====
 const generateTestData = async () => {
   console.log('=> Génération des données de test...');
@@ -454,6 +480,7 @@ const deleteAllPosts = async () => {
         <strong>{{ comment.author }}</strong>
         <span class="comment-date">({{ new Date(comment.creation_date).toLocaleString() }})</span>
         <p>{{ comment.content }}</p>
+        <button @click="deleteComment(post, comment._id)" class="btn-comment-delete">X</button>
       </div>
       <div class="comment-input-wrapper">
         <input
@@ -617,5 +644,18 @@ button:hover {
 .comment-input {
   flex: 1;
   margin-bottom: 0 !important;
+}
+
+.btn-comment-delete {
+  background-color: #e74c3c;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.btn-comment-delete:hover {
+  background-color: #c0392b;
 }
 </style>
