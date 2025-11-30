@@ -7,8 +7,10 @@ PouchDB.plugin(findPlugin);
 // ===== INTERFACES =====
 declare interface Comment {
   _id: string
+  postId: string          // ← NOUVEAU : référence au post
   content: string
   author: string
+  type: 'comment'         // ← NOUVEAU : pour identifier c'est un commentaire
   creation_date: string
 }
 
@@ -19,9 +21,9 @@ declare interface Post {
   title: string
   content: string
   likes: number
-  comments: Comment[]
-  creation_date: any
-  updated_date: any
+  // ← SUPPRIMÉ : comments: Comment[]
+  creation_date: string
+  updated_date: string
 }
 
 const storage = ref();
@@ -203,7 +205,6 @@ const createDoc = (): any => {
     title: title,
     content: content,
     likes: 0,
-    comments: [],
     creation_date: new Date().toISOString(),
     updated_date: new Date().toISOString()
   }
@@ -304,13 +305,14 @@ const addComment = (post: Post): any => {
   // Créer le nouveau commentaire
   const newComment: Comment = {
     _id: `comment_${Date.now()}`,
+    postId: post._id,          // ← Référence au post
     content: commentContent,
     author: 'Toi',
+    type: 'comment',          // ← Type commentaire
     creation_date: new Date().toISOString()
   }
 
   // Ajouter le commentaire au post
-  post.comments.push(newComment)
   post.updated_date = new Date().toISOString()
 
   // Sauvegarder le post modifié
@@ -397,8 +399,10 @@ const generateTestData = async () => {
     for (let j = 0; j < nbComments; j++) {
       const comment: Comment = {
         _id: `comment_${i}_${j}_${Date.now()}`,
+        postId: `post_test_${i}_${Date.now()}`,  // ← Référence au post
         content: commentTexts[Math.floor(Math.random() * commentTexts.length)] ?? 'Super post !',
         author: 'Toi',
+        type: 'comment',          // ← Type commentaire
         creation_date: new Date(Date.now() - Math.random() * 7 * 24 * 60 * 60 * 1000).toISOString()
       }
       comments.push(comment)
@@ -410,7 +414,6 @@ const generateTestData = async () => {
       title: titles[i % titles.length] + ' ' + i,
       content: contents[i % contents.length] + ' ' + i,
       likes: Math.floor(Math.random() * 50),
-      comments: comments,
       creation_date: new Date(Date.now() - Math.random() * 7 * 24 * 60 * 60 * 1000).toISOString(),
       updated_date: new Date().toISOString()
     }
