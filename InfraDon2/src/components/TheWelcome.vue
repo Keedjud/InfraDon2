@@ -90,6 +90,11 @@ const replicateFromServer = () => {
 }
 
 const syncData = () => {
+  if (offlineMode.value) {
+    console.log('=> Pas de sync (mode hors ligne activé)')
+    return
+  }
+
   console.log('=> Lancement de la synchronisation bidirectionnelle')
 
   sync.value = storage.value
@@ -106,8 +111,12 @@ const syncData = () => {
 
       lastSyncTime.value = new Date().toLocaleTimeString()
     })
-    .on('paused', () => {
+    .on('paused', async () => {
       console.log('=> Sync en pause (normal)')
+
+      // Résoudre automatiquement les conflits
+      await resolveConflicts()
+
       syncStatus.value = 'Synchronisé'
       isOnline.value = true
     })
@@ -526,6 +535,68 @@ const deleteAllPosts = async () => {
   }
 }
 
+// ===== GESTION DES CONFLITS =====
+const detectConflicts = async () => {
+  try {
+    const result = await storage.value.allDocs({
+      include_docs: true,
+      conflicts: true
+    })
+
+    let conflictCount = 0
+    const conflictedDocs: string[] = []
+
+    result.rows.forEach((row: any) => {
+      if (row.doc._conflicts && row.doc._conflicts.length > 0) {
+        conflictCount++
+        conflictedDocs.push(row.doc.title || row.doc._id)
+        console.warn('⚠️ CONFLIT DÉTECTÉ sur:', row.doc._id)
+        console.warn('  Révision gagnante:', row.doc._rev)
+        console.warn('  Révisions perdantes:', row.doc._conflicts)
+      }
+    })
+
+    if (conflictCount > 0) {
+      alert(`⚠️ ${conflictCount} conflit(s) de fusion détecté(s):\n\n${conflictedDocs.join('\n')}\n\nLes données ont été fusionnées automatiquement. Vérifiez le contenu de ces éléments.`)
+    }
+  } catch (err: any) {
+    console.error('Erreur détection conflits:', err)
+  }
+}
+
+const resolveConflicts = async () => {
+  try {
+    const result = await storage.value.allDocs({
+      include_docs: true,
+      conflicts: true
+    })
+
+    for (const row of result.rows) {
+      if (row.doc._conflicts && row.doc._conflicts.length > 0) {
+        console.log('=> Résolution du conflit sur:', row.doc._id)
+
+        const losingRevs = row.doc._conflicts
+
+        // Garder la version gagnante (plus récente selon PouchDB)
+        // Supprimer les révisions perdantes
+        for (const conflictRev of losingRevs) {
+          try {
+            await storage.value.remove({
+              _id: row.doc._id,
+              _rev: conflictRev
+            })
+            console.log('✓ Conflit résolu pour:', row.doc._id)
+          } catch (err: any) {
+            console.error('Erreur suppression conflit:', err)
+          }
+        }
+      }
+    }
+  } catch (err: any) {
+    console.error('Erreur résolution conflits:', err)
+  }
+}
+
 const searchReset = () => {
   const searchInput = document.querySelector('.search') as HTMLInputElement
   if (searchInput) searchInput.value = ''
@@ -533,7 +604,7 @@ const searchReset = () => {
 }
 
 const toggle = () => {
-  if (sync.value) {
+  if (!offlineMode.value) {
     sync.value.cancel()
     sync.value = null
     offlineMode.value = true
@@ -547,6 +618,12 @@ const toggle = () => {
     offlineChanges.value = 0
     syncStatus.value = '🔄 Reconnexion...'
     syncData()
+
+    setTimeout(async () => {
+      await detectConflicts()
+      fetchData()
+    }, 2000)
+
     console.log('=> Mode hors ligne désactivé - Sync réactivée')
   }
 }
