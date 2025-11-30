@@ -31,6 +31,11 @@ const url = 'http://inoe.wenger:IWtramp54HEIG/@localhost:5984/infradon_inoe_db/'
 const opts = { live: true, retry: true };
 const postsData = ref<Post[]>([])
 const sync = ref();
+const replicationStatus = ref<string>('En attente...')
+const isReplicating = ref<boolean>(false)
+const isOnline = ref<boolean>(true)
+const syncStatus = ref<string>('En ligne')
+const lastSyncTime = ref<string>('')
 
 onMounted(() => {
   console.log('=> Composant initialisé');
@@ -44,18 +49,112 @@ const initDatabase = async () => {
     console.log("Connected to collection : " + localdb?.name)
     storage.value = localdb
 
-    // Créer les indexes ET ATTENDRE
     await createIndexes()
-
-    localdb.replicate.from(url)
-    .on('complete', () => {
-      console.log('Réplication complète')
-      fetchData()
-      syncData()
-    })
+    replicateFromServer()
   } else {
     console.warn('Something went wrong')
   }
+}
+
+const replicateFromServer = () => {
+  console.log('=> Début de la réplication depuis le serveur');
+  isReplicating.value = true
+  replicationStatus.value = '⏳ Réplication en cours...'
+
+  storage.value
+    .replicate.from(url)
+    .on('change', (info: any) => {
+      console.log('=> Changement lors de la réplication:', info.docs_read + ' documents lus')
+      replicationStatus.value = `⏳ ${info.docs_read} documents synchronisés...`
+    })
+    .on('complete', (info: any) => {
+      console.log('Réplication complète :', info.docs_read + ' documents')
+      isReplicating.value = false
+      replicationStatus.value = 'Synchronisation complète'
+
+      fetchData()
+      syncData()
+    })
+    .on('error', (err: any) => {
+      console.error('Erreur réplication :', err)
+      isReplicating.value = false
+      replicationStatus.value = 'Erreur : ' + err.message
+    })
+    .on('denied', (err: any) => {
+      console.error('Accès refusé :', err)
+      isReplicating.value = false
+      replicationStatus.value = '✗ Accès refusé'
+    })
+}
+
+const syncData = () => {
+  console.log('=> Lancement de la synchronisation bidirectionnelle');
+  
+  sync.value = storage.value
+    .sync(url, opts)
+    .on('change', (change: any) => {
+      console.log('=> Changement détecté lors de la sync:', change)
+      
+      // Déterminer la direction
+      if (change.direction === 'pull') {
+        console.log('  ← Pull : ' + change.change.docs.length + ' doc(s) du serveur')
+      } else if (change.direction === 'push') {
+        console.log('  → Push : ' + change.change.docs.length + ' doc(s) vers le serveur')
+      }
+      
+      lastSyncTime.value = new Date().toLocaleTimeString()
+    })
+    .on('paused', () => {
+      console.log('=> Sync en pause (normal)')
+      syncStatus.value = '✓ Synchronisé'
+      isOnline.value = true
+    })
+    .on('active', () => {
+      console.log('=> Sync réactivée')
+      syncStatus.value = '🔄 Synchronisation...'
+      isOnline.value = true
+    })
+    .on('error', (err: any) => {
+      console.error('Erreur sync :', err)
+      syncStatus.value = 'Erreur : ' + err.message
+      isOnline.value = false
+    })
+    .on('denied', (err: any) => {
+      console.error('Accès refusé lors de la sync :', err)
+      syncStatus.value = 'Accès refusé'
+      isOnline.value = false
+    })
+}
+
+const search = (event: any) => {
+  event.target.blur()
+
+  const query = event.target.value.trim()
+
+  if (query === "") {
+    fetchData()
+    return
+  }
+
+  console.log('=> Recherche sur :', query);
+
+  storage.value.find({
+    selector: {
+      type: 'post',
+      $or: [
+        { title: { $regex: query } },
+        { content: { $regex: query } }
+      ]
+    }
+  })
+  .then(async (result: any) => {
+    console.log('=> Résultats trouvés :', result.docs.length)
+    const postsWithComments = await attachComments(result.docs)
+    postsData.value = postsWithComments as Post[]
+  })
+  .catch((error: any) => {
+    console.error('Erreur lors de la recherche :', error)
+  })
 }
 
 const createIndexes = async () => {
@@ -84,60 +183,7 @@ const createIndexes = async () => {
   }
 }
 
-const syncData = () => {
-  sync.value = storage.value
-  .sync(url, opts)
-  .on('change', fetchData)
-}
 
-const toggle = () => {
-  if (sync.value) {
-    sync.value.cancel()
-    sync.value = null
-  } else {
-    syncData()
-  }
-}
-
-const search = (event: any) => {
-  event.target.blur()
-
-  const query = event.target.value.trim()
-
-  if (query === "") {
-    fetchData()
-    return
-  }
-
-  console.log('=> Recherche sur :', query);
-
-  storage.value.find({
-    selector: {
-      type: 'post',
-      $or: [
-        { title: { $regex: query } },
-        { content: { $regex: query } }
-      ]
-    }
-  })
-  .then((result: any) => {
-    console.log('=> Résultats trouvés :', result.docs.length)
-    postsData.value = result.docs as Post[]
-  })
-  .catch((error: any) => {
-    console.error('Erreur lors de la recherche :', error)
-  })
-}
-
-const searchReset = () => {
-  const searchInput = document.querySelector(".search") as HTMLInputElement
-  if (searchInput) {
-    searchInput.value = ""
-  }
-  fetchData()
-}
-
-// ===== TRI PAR LIKES =====
 const sortByLikes = (): any => {
   console.log('=> Tri par nombre de likes');
 
@@ -181,24 +227,20 @@ const fetchData = async (posts?: Post[]): Promise<any> => {
 
 // Fonction utilitaire pour ajouter les commentaires aux posts
 const attachComments = async (posts: Post[]): Promise<Post[]> => {
-  const postsWithComments: Post[] = []
-  
-  // Boucle séquentielle pour préserver l'ordre
-  for (const post of posts) {
-    const commentsResult = await storage.value.find({
-      selector: {
-        type: 'comment',
-        postId: post._id
-      }
-    })
-    
-    postsWithComments.push({
-      ...post,
-      comments: commentsResult.docs as Comment[]
-    })
-  }
-  
-  return postsWithComments
+  const results = await Promise.all(
+    posts.map(post =>
+      storage.value.find({
+        selector: {
+          type: 'comment',
+          postId: post._id
+        }
+      }).then((commentsResult: any) => ({
+        ...post,
+        comments: commentsResult.docs as Comment[]
+      }))
+    )
+  )
+  return results
 }
 
 const createDoc = (): any => {
@@ -477,15 +519,47 @@ const deleteAllPosts = async () => {
   }
 }
 
+const searchReset = () => {
+  const searchInput = document.querySelector(".search") as HTMLInputElement
+  if (searchInput) {
+    searchInput.value = ""
+  }
+  fetchData()
+}
+
+const toggle = () => {
+  if (sync.value) {
+    sync.value.cancel()
+    sync.value = null
+    syncStatus.value = '⏸️ Synchronisation arrêtée'
+    isOnline.value = false
+    console.log('=> Sync arrêtée')
+  } else {
+    syncData()
+  }
+}
 </script>
 
 <template>
   <h1>Fetch Data</h1>
+  
+  <!-- STATUT DE RÉPLICATION -->
+  <div class="replication-status">
+    <p>{{ replicationStatus }}</p>
+  </div>
+  
   <div>
-    <label v-if="sync"> Online</label>
-    <label v-else> Offline</label>
-    <input @click="toggle" type="checkbox" name="toggleSync" />
+    <label v-if="isOnline" style="color: green; font-weight: bold;">
+      🟢 {{ syncStatus }}
+    </label>
+    <label v-else style="color: red; font-weight: bold;">
+      🔴 {{ syncStatus }}
+    </label>
+    <input @click="toggle" type="checkbox" name="toggleSync" :checked="sync != null" />
     <label for="toggleSync">Toggle Sync</label>
+    <span v-if="lastSyncTime" style="font-size: 0.9em; color: #999;">
+      (Dernière sync: {{ lastSyncTime }})
+    </span>
   </div>
   <div>
     <input type="text" placeholder="Search" @keyup.enter="search" class="search">
@@ -633,6 +707,91 @@ button:hover {
 
 .btn-danger:hover {
   background-color: #c82333;
+}
+
+.btn-primary {
+  background-color: #28a745;
+  color: white;
+}
+
+.btn-primary:hover {
+  background-color: #218838;
+}
+
+.btn-secondary {
+  background-color: #6c757d;
+  color: white;
+}
+
+.btn-secondary:hover {
+  background-color: #5a6268;
+}
+
+.btn-sort {
+  background-color: #17a2b8;
+  color: white;
+}
+
+.btn-sort:hover {
+  background-color: #138496;
+}
+
+.btn-small {
+  background-color: #007bff;
+  padding: 6px 10px;
+  font-size: 0.9em;
+  margin-right: 5px;
+}
+
+.btn-small:hover {
+  background-color: #0056b3;
+}
+
+.btn-small-danger {
+  background-color: #dc3545;
+  padding: 6px 10px;
+  font-size: 0.9em;
+  margin-right: 5px;
+}
+
+.btn-small-danger:hover {
+  background-color: #c82333;
+}
+
+.btn-like {
+  background-color: #ffc107;
+  color: #333;
+  padding: 8px 12px;
+}
+
+.btn-like:hover {
+  background-color: #e0a800;
+}
+
+.btn-comment {
+  background-color: #007bff;
+  color: white;
+  padding: 8px 12px;
+}
+
+.btn-comment:hover {
+  background-color: #0056b3;
+}
+
+.replication-status {
+  background-color: #e8f4f8;
+  border: 1px solid #3498db;
+  border-radius: 4px;
+  padding: 12px;
+  margin-bottom: 15px;
+  text-align: center;
+  color: #2c3e50;
+  font-weight: bold;
+}
+
+.replication-status p {
+  margin: 0;
+  color: #2c3e50;
 }
 
 /* ===== SECTIONS ===== */
