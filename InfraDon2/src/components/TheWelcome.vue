@@ -1,15 +1,27 @@
 <script setup lang="ts">
 import PouchDB from 'pouchdb'
 import { onMounted, ref } from 'vue';
+import findPlugin from "pouchdb-find";
+PouchDB.plugin(findPlugin);
+
+// ===== INTERFACES =====
+declare interface Comment {
+  _id: string
+  content: string
+  author: string
+  creation_date: string
+}
 
 declare interface Post {
   _id: string
-  _rev: string
+  _rev?: string
+  type: 'post'
   title: string
   content: string
-  attributes: {
-    creation_date: any
-  }
+  likes: number
+  comments: Comment[]
+  creation_date: any
+  updated_date: any
 }
 
 const storage = ref();
