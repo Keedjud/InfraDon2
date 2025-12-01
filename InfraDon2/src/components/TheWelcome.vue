@@ -7,7 +7,7 @@ PouchDB.plugin(findPlugin)
 // ===== INTERFACES =====
 declare interface Comment {
   _id: string
-  postId: string // ← NOUVEAU : référence au post
+  postId: string
   content: string
   author: string
   type: 'comment' // ← NOUVEAU : pour identifier c'est un commentaire
@@ -417,6 +417,34 @@ const deleteComment = (post: Post, comment: Comment): any => {
     })
 }
 
+const updateComment = (post: Post, comment: Comment): any => {
+  console.log('=> Modification du commentaire:', comment._id)
+
+  // Récupérer le nouveau contenu
+  const newContent = prompt('Nouveau contenu du commentaire:', comment.content)
+  if (newContent === null) return // Annulation
+
+  // Validation
+  if (!newContent.trim()) {
+    console.warn('Le commentaire ne peut pas être vide')
+    return
+  }
+
+  // Modifier le commentaire
+  comment.content = newContent.trim()
+
+  storage.value
+    .put(comment)
+    .then((response: any) => {
+      console.log('Commentaire modifié :', response)
+      trackLocalChange()
+      fetchData()
+    })
+    .catch((err: any) => {
+      console.error('Erreur modification commentaire :', err)
+    })
+}
+
 // ===== FACTORY - GÉNÉRER DONNÉES TEST =====
 const generateTestData = async () => {
   console.log('=> Génération des données de test...')
@@ -708,6 +736,7 @@ const trackLocalChange = () => {
         <span class="comment-date">({{ new Date(comment.creation_date).toLocaleString() }})</span>
         <p>{{ comment.content }}</p>
         <button @click="deleteComment(post, comment)" class="btn-comment-delete">✕</button>
+        <button @click="updateComment(post, comment)" class="btn-comment-edit">✏️</button>
       </div>
       <div class="comment-input-wrapper">
         <input
@@ -967,5 +996,18 @@ button:hover {
 
 .btn-comment-delete:hover {
   background-color: #c0392b;
+}
+
+.btn-comment-edit {
+  background-color: #ffc107;
+  color: #333;
+  border: none;
+  border-radius: 4px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.btn-comment-edit:hover {
+  background-color: #e0a800;
 }
 </style>
