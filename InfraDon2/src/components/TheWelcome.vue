@@ -10,7 +10,7 @@ declare interface Comment {
   postId: string
   content: string
   author: string
-  type: 'comment' // ← NOUVEAU : pour identifier c'est un commentaire
+  type: 'comment'
   creation_date: string
 }
 
@@ -200,9 +200,9 @@ const sortByLikes = (): any => {
     .find({
       selector: {
         type: 'post',
-        likes: { $gte: 0 }, // ← Force l'utilisation de l'index
+        likes: { $gte: 0 },
       },
-      sort: [{ type: 'asc' }, { likes: 'desc' }], // ← Trier par type PUIS par likes
+      sort: [{ type: 'asc' }, { likes: 'desc' }],
     })
     .then(async (result: any) => {
       console.log('=> Posts triés par likes :', result.docs.length)
@@ -313,10 +313,10 @@ const deleteDoc = (post: Post): any => {
 const updateDoc = (post: Post): any => {
   // Récupérer les nouvelles valeurs
   const newTitle = prompt('Nouveau titre:', post.title)
-  if (newTitle === null) return // Annulation
+  if (newTitle === null) return
 
   const newContent = prompt('Nouveau contenu:', post.content)
-  if (newContent === null) return // Annulation
+  if (newContent === null) return
 
   // Validation
   if (!newTitle.trim() || !newContent.trim()) {
@@ -380,14 +380,14 @@ const addComment = (post: Post): any => {
   // Créer le nouveau commentaire
   const newComment: Comment = {
     _id: `comment_${Date.now()}`,
-    postId: post._id, // ← Référence au post
+    postId: post._id,
     content: commentContent,
     author: 'Toi',
-    type: 'comment', // ← Type commentaire
+    type: 'comment',
     creation_date: new Date().toISOString(),
   }
 
-  // Sauvegarder le commentaire comme DOCUMENT INDÉPENDANT
+  // Sauvegarder le commentaire
   storage.value
     .post(newComment)
     .then((response: any) => {
@@ -404,7 +404,7 @@ const addComment = (post: Post): any => {
 const deleteComment = (post: Post, comment: Comment): any => {
   console.log('=> Suppression du commentaire:', comment._id)
 
-  // Supprimer le commentaire comme DOCUMENT INDÉPENDANT
+  // Supprimer le commentaire
   storage.value
     .remove(comment)
     .then((response: any) => {
@@ -422,7 +422,7 @@ const updateComment = (post: Post, comment: Comment): any => {
 
   // Récupérer le nouveau contenu
   const newContent = prompt('Nouveau contenu du commentaire:', comment.content)
-  if (newContent === null) return // Annulation
+  if (newContent === null) return
 
   // Validation
   if (!newContent.trim()) {
@@ -513,12 +513,12 @@ const generateTestData = async () => {
   let totalComments = 0
 
   for (let i = 0; i < postIds.length; i++) {
-    const nbComments = Math.floor(Math.random() * 5) // Entre 0 et 4 commentaires
+    const nbComments = Math.floor(Math.random() * 5)
 
     for (let j = 0; j < nbComments; j++) {
       const comment: Comment = {
         _id: `comment_${Date.now()}_${Math.random()}`,
-        postId: postIds[i]!, // ← Référence au post créé
+        postId: postIds[i]!,
         content: commentTexts[Math.floor(Math.random() * commentTexts.length)]!,
         author: 'Toi',
         type: 'comment',
