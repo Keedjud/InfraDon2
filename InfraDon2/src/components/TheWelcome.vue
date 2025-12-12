@@ -7,6 +7,7 @@ PouchDB.plugin(findPlugin)
 // ===== INTERFACES =====
 declare interface Comment {
   _id: string
+  _rev?: string
   postId: string
   content: string
   author: string
@@ -27,11 +28,14 @@ declare interface Post {
 }
 
 // ===== VARIABLES =====
-const storage = ref()
-const url = 'http://inoe.wenger:IWtramp54HEIG/@localhost:5984/infradon_inoe_db/'
+const postsDB = ref()
+const commentsDB = ref()
+const postsUrl = 'http://inoe.wenger:IWtramp54HEIG/@localhost:5984/infradon_inoe_posts/'
+const commentsUrl = 'http://inoe.wenger:IWtramp54HEIG/@localhost:5984/infradon_inoe_comments/'
 const opts = { live: true, retry: true }
 const postsData = ref<Post[]>([])
-const sync = ref()
+const postsSync = ref()
+const commentsSync = ref()
 const replicationStatus = ref<string>('En attente...')
 const isReplicating = ref<boolean>(false)
 const isOnline = ref<boolean>(true)
@@ -46,11 +50,15 @@ onMounted(() => {
 })
 
 const initDatabase = async () => {
-  console.log('=> Connexion à la base de données')
-  const localdb = new PouchDB('local')
-  if (localdb) {
-    console.log('Connected to collection : ' + localdb?.name)
-    storage.value = localdb
+  console.log('=> Connexion aux bases de données')
+  const localPostsDB = new PouchDB('local_posts')
+  const localCommentsDB = new PouchDB('local_comments')
+
+  if (localPostsDB && localCommentsDB) {
+    console.log('Connected to posts collection : ' + localPostsDB?.name)
+    console.log('Connected to comments collection : ' + localCommentsDB?.name)
+    postsDB.value = localPostsDB
+    commentsDB.value = localCommentsDB
 
     await createIndexes()
     replicateFromServer()
@@ -64,29 +72,52 @@ const replicateFromServer = () => {
   isReplicating.value = true
   replicationStatus.value = '⏳ Réplication en cours...'
 
-  storage.value.replicate
-    .from(url)
-    .on('change', (info: any) => {
-      console.log('=> Changement lors de la réplication:', info.docs_read + ' documents lus')
-      replicationStatus.value = `⏳ ${info.docs_read} documents synchronisés...`
-    })
-    .on('complete', (info: any) => {
-      console.log('Réplication complète :', info.docs_read + ' documents')
-      isReplicating.value = false
-      replicationStatus.value = 'Synchronisation complète'
+  let postsReplicationDone = false
+  let commentsReplicationDone = false
 
+  const checkBothComplete = () => {
+    if (postsReplicationDone && commentsReplicationDone) {
+      console.log('Réplication des 2 bases complète')
+      isReplicating.value = false
+      replicationStatus.value = '✅ Synchronisation complète (posts + commentaires)'
       fetchData()
       syncData()
+    }
+  }
+
+  // Réplication des posts
+  postsDB.value.replicate
+    .from(postsUrl)
+    .on('change', (info: any) => {
+      console.log('=> Posts : ' + info.docs_read + ' documents lus')
+      replicationStatus.value = `⏳ Posts: ${info.docs_read} documents...`
+    })
+    .on('complete', (info: any) => {
+      console.log('Réplication posts complète :', info.docs_read + ' documents')
+      postsReplicationDone = true
+      checkBothComplete()
     })
     .on('error', (err: any) => {
-      console.error('Erreur réplication :', err)
+      console.error('Erreur réplication posts :', err)
       isReplicating.value = false
-      replicationStatus.value = 'Erreur : ' + err.message
+      replicationStatus.value = 'Erreur posts : ' + err.message
     })
-    .on('denied', (err: any) => {
-      console.error('Accès refusé :', err)
+
+  // Réplication des commentaires
+  commentsDB.value.replicate
+    .from(commentsUrl)
+    .on('change', (info: any) => {
+      console.log('=> Commentaires : ' + info.docs_read + ' documents lus')
+    })
+    .on('complete', (info: any) => {
+      console.log('Réplication commentaires complète :', info.docs_read + ' documents')
+      commentsReplicationDone = true
+      checkBothComplete()
+    })
+    .on('error', (err: any) => {
+      console.error('Erreur réplication commentaires :', err)
       isReplicating.value = false
-      replicationStatus.value = 'Accès refusé'
+      replicationStatus.value = 'Erreur commentaires : ' + err.message
     })
 }
 
@@ -96,44 +127,48 @@ const syncData = () => {
     return
   }
 
-  console.log('=> Lancement de la synchronisation bidirectionnelle')
+  console.log('=> Lancement de la synchronisation bidirectionnelle (2 bases)')
 
-  sync.value = storage.value
-    .sync(url, opts)
+  // Synchronisation des posts
+  postsSync.value = postsDB.value
+    .sync(postsUrl, opts)
     .on('change', (change: any) => {
-      console.log('=> Changement détecté lors de la sync:', change)
-
-      // Déterminer la direction
-      if (change.direction === 'pull') {
-        console.log('  ← Pull : ' + change.change.docs.length + ' doc(s) du serveur')
-      } else if (change.direction === 'push') {
-        console.log('  → Push : ' + change.change.docs.length + ' doc(s) vers le serveur')
-      }
-
+      console.log('=> Posts sync:', change.direction, change.change.docs.length + ' doc(s)')
       lastSyncTime.value = new Date().toLocaleTimeString()
     })
     .on('paused', async () => {
-      console.log('=> Sync en pause (normal)')
-
-      // Résoudre automatiquement les conflits
+      console.log('=> Posts sync en pause')
       await resolveConflicts()
-
       syncStatus.value = 'Synchronisé'
       isOnline.value = true
     })
     .on('active', () => {
-      console.log('=> Sync réactivée')
+      console.log('=> Posts sync active')
       syncStatus.value = '🔄 Synchronisation...'
       isOnline.value = true
     })
     .on('error', (err: any) => {
-      console.error('Erreur sync :', err)
-      syncStatus.value = 'Erreur : ' + err.message
+      console.error('Erreur sync posts :', err)
+      syncStatus.value = 'Erreur posts : ' + err.message
       isOnline.value = false
     })
-    .on('denied', (err: any) => {
-      console.error('Accès refusé lors de la sync :', err)
-      syncStatus.value = 'Accès refusé'
+
+  // Synchronisation des commentaires
+  commentsSync.value = commentsDB.value
+    .sync(commentsUrl, opts)
+    .on('change', (change: any) => {
+      console.log('=> Commentaires sync:', change.direction, change.change.docs.length + ' doc(s)')
+      lastSyncTime.value = new Date().toLocaleTimeString()
+    })
+    .on('paused', () => {
+      console.log('=> Commentaires sync en pause')
+    })
+    .on('active', () => {
+      console.log('=> Commentaires sync active')
+    })
+    .on('error', (err: any) => {
+      console.error('Erreur sync commentaires :', err)
+      syncStatus.value = 'Erreur commentaires : ' + err.message
       isOnline.value = false
     })
 }
@@ -150,10 +185,9 @@ const search = (event: any) => {
 
   console.log('=> Recherche sur :', query)
 
-  storage.value
+  postsDB.value
     .find({
       selector: {
-        type: 'post',
         $or: [{ title: { $regex: query } }, { content: { $regex: query } }],
       },
     })
@@ -171,23 +205,22 @@ const createIndexes = async () => {
   console.log('=> Création des indexes')
 
   try {
-    await storage.value.createIndex({ index: { fields: ['title'] } })
-    console.log("Index 'title' créé")
+    // Index pour la base posts
+    await postsDB.value.createIndex({ index: { fields: ['title'] } })
+    console.log("Index posts 'title' créé")
 
-    await storage.value.createIndex({ index: { fields: ['content'] } })
-    console.log("Index 'content' créé")
+    await postsDB.value.createIndex({ index: { fields: ['content'] } })
+    console.log("Index posts 'content' créé")
 
-    await storage.value.createIndex({ index: { fields: ['type'] } })
-    console.log("Index 'type' créé")
+    await postsDB.value.createIndex({ index: { fields: ['likes'] } })
+    console.log("Index posts 'likes' créé")
 
-    await storage.value.createIndex({ index: { fields: ['type', 'likes'] } })
-    console.log("Index 'type + likes' créé")
+    // Index pour la base commentaires
+    await commentsDB.value.createIndex({ index: { fields: ['postId'] } })
+    console.log("Index comments 'postId' créé")
 
-    await storage.value.createIndex({ index: { fields: ['postId'] } })
-    console.log("Index 'postId' créé")
-
-    await storage.value.createIndex({ index: { fields: ['type', 'postId'] } })
-    console.log("Index 'type + postId' créé")
+    await commentsDB.value.createIndex({ index: { fields: ['content'] } })
+    console.log("Index comments 'content' créé")
   } catch (err: any) {
     console.error('Erreur création indexes:', err)
   }
@@ -196,13 +229,12 @@ const createIndexes = async () => {
 const sortByLikes = (): any => {
   console.log('=> Tri par nombre de likes')
 
-  storage.value
+  postsDB.value
     .find({
       selector: {
-        type: 'post',
         likes: { $gte: 0 },
       },
-      sort: [{ type: 'asc' }, { likes: 'desc' }],
+      sort: [{ likes: 'desc' }],
     })
     .then(async (result: any) => {
       console.log('=> Posts triés par likes :', result.docs.length)
@@ -217,13 +249,13 @@ const sortByLikes = (): any => {
 const fetchData = async (posts?: Post[]): Promise<any> => {
   // Si pas de posts en paramètre, récupérer les posts de la base
   if (!posts) {
-    storage.value
-      .find({
-        selector: { type: 'post' },
-      })
+    postsDB.value
+      .allDocs({ include_docs: true })
       .then(async (result: any) => {
-        console.log('=> Posts récupérés :', result.docs.length)
-        posts = result.docs as Post[]
+        // Filtrer les documents système (_design, _local)
+        const validRows = result.rows.filter((row: any) => !row.id.startsWith('_'))
+        console.log('=> Posts récupérés :', validRows.length)
+        posts = validRows.map((row: any) => row.doc) as Post[]
 
         // Ajouter les commentaires
         const postsWithComments = await attachComments(posts)
@@ -239,10 +271,9 @@ const fetchData = async (posts?: Post[]): Promise<any> => {
 const attachComments = async (posts: Post[]): Promise<Post[]> => {
   const results = await Promise.all(
     posts.map((post) =>
-      storage.value
+      commentsDB.value
         .find({
           selector: {
-            type: 'comment',
             postId: post._id,
           },
         })
@@ -281,7 +312,7 @@ const createDoc = (): any => {
     updated_date: new Date().toISOString(),
   }
 
-  storage.value
+  postsDB.value
     .post(newPost)
     .then((response: any) => {
       console.log('Post créé :', response)
@@ -298,7 +329,7 @@ const createDoc = (): any => {
 const deleteDoc = (post: Post): any => {
   console.log('=> Suppression du post:', post._id)
 
-  storage.value
+  postsDB.value
     .remove(post)
     .then((response: any) => {
       console.log('Post supprimé :', response)
@@ -331,7 +362,7 @@ const updateDoc = (post: Post): any => {
   post.content = newContent.trim()
   post.updated_date = new Date().toISOString()
 
-  storage.value
+  postsDB.value
     .put(post)
     .then((response: any) => {
       console.log('Post modifié :', response)
@@ -351,7 +382,7 @@ const toggleLike = (post: Post): any => {
   post.likes++
   post.updated_date = new Date().toISOString()
 
-  storage.value
+  postsDB.value
     .put(post)
     .then((response: any) => {
       console.log('Post liké :', response)
@@ -388,7 +419,7 @@ const addComment = (post: Post): any => {
   }
 
   // Sauvegarder le commentaire
-  storage.value
+  commentsDB.value
     .post(newComment)
     .then((response: any) => {
       console.log('Commentaire ajouté :', response)
@@ -405,7 +436,7 @@ const deleteComment = (post: Post, comment: Comment): any => {
   console.log('=> Suppression du commentaire:', comment._id)
 
   // Supprimer le commentaire
-  storage.value
+  commentsDB.value
     .remove(comment)
     .then((response: any) => {
       console.log('Commentaire supprimé :', response)
@@ -433,7 +464,7 @@ const updateComment = (post: Post, comment: Comment): any => {
   // Modifier le commentaire
   comment.content = newContent.trim()
 
-  storage.value
+  commentsDB.value
     .put(comment)
     .then((response: any) => {
       console.log('Commentaire modifié :', response)
@@ -500,7 +531,7 @@ const generateTestData = async () => {
     }
 
     try {
-      await storage.value.post(post)
+      await postsDB.value.post(post)
       console.log('Post ' + i + ' créé')
     } catch (err: any) {
       console.error('Erreur création post test:', err)
@@ -526,7 +557,7 @@ const generateTestData = async () => {
       }
 
       try {
-        await storage.value.post(comment)
+        await commentsDB.value.post(comment)
         totalComments++
       } catch (err: any) {
         console.error('Erreur création commentaire test:', err)
@@ -545,20 +576,42 @@ const deleteAllPosts = async () => {
     return
   }
 
-  console.log('=> Suppression définitive de tous les posts...')
+  console.log('=> Suppression définitive de tous les posts et commentaires...')
 
   try {
-    // Supprimer la base de données locale COMPLÈTEMENT
-    await storage.value.destroy()
+    // Récupérer tous les posts
+    const postsResult = await postsDB.value.allDocs({ include_docs: true })
+    console.log('Posts à supprimer:', postsResult.rows.length)
 
-    // Recréer une base vide
-    storage.value = new PouchDB('local')
+    // Récupérer tous les commentaires
+    const commentsResult = await commentsDB.value.allDocs({ include_docs: true })
+    console.log('Commentaires à supprimer:', commentsResult.rows.length)
 
-    // Attendre que les indexes soient créés
-    await createIndexes()
+    // Supprimer tous les posts un par un
+    for (const row of postsResult.rows) {
+      try {
+        await postsDB.value.remove(row.doc)
+        console.log('Post supprimé:', row.id)
+      } catch (err: any) {
+        console.error('Erreur suppression post:', row.id, err)
+      }
+    }
 
-    console.log('Tous les posts supprimés')
+    // Supprimer tous les commentaires un par un
+    for (const row of commentsResult.rows) {
+      try {
+        await commentsDB.value.remove(row.doc)
+        console.log('Commentaire supprimé:', row.id)
+      } catch (err: any) {
+        console.error('Erreur suppression commentaire:', row.id, err)
+      }
+    }
+
+    console.log('✅ Tous les posts et commentaires supprimés (local + serveur)')
     postsData.value = []
+
+    // Rafraîchir l'affichage
+    await fetchData()
   } catch (err: any) {
     console.error('Erreur suppression posts:', err)
   }
@@ -567,26 +620,48 @@ const deleteAllPosts = async () => {
 // ===== GESTION DES CONFLITS =====
 const detectConflicts = async () => {
   try {
-    const result = await storage.value.allDocs({
+    // Vérifier les conflits dans les posts
+    const postsResult = await postsDB.value.allDocs({
       include_docs: true,
-      conflicts: true
+      conflicts: true,
+    })
+
+    // Vérifier les conflits dans les commentaires
+    const commentsResult = await commentsDB.value.allDocs({
+      include_docs: true,
+      conflicts: true,
     })
 
     let conflictCount = 0
     const conflictedDocs: string[] = []
 
-    result.rows.forEach((row: any) => {
+    // Filtrer les documents système
+    const validPostRows = postsResult.rows.filter((row: any) => !row.id.startsWith('_'))
+    validPostRows.forEach((row: any) => {
       if (row.doc._conflicts && row.doc._conflicts.length > 0) {
         conflictCount++
-        conflictedDocs.push(row.doc.title || row.doc._id)
-        console.warn('⚠️ CONFLIT DÉTECTÉ sur:', row.doc._id)
+        conflictedDocs.push('Post: ' + (row.doc.title || row.doc._id))
+        console.warn('⚠️ CONFLIT DÉTECTÉ sur post:', row.doc._id)
+        console.warn('  Révision gagnante:', row.doc._rev)
+        console.warn('  Révisions perdantes:', row.doc._conflicts)
+      }
+    })
+
+    const validCommentRows = commentsResult.rows.filter((row: any) => !row.id.startsWith('_'))
+    validCommentRows.forEach((row: any) => {
+      if (row.doc._conflicts && row.doc._conflicts.length > 0) {
+        conflictCount++
+        conflictedDocs.push('Commentaire: ' + row.doc._id)
+        console.warn('⚠️ CONFLIT DÉTECTÉ sur commentaire:', row.doc._id)
         console.warn('  Révision gagnante:', row.doc._rev)
         console.warn('  Révisions perdantes:', row.doc._conflicts)
       }
     })
 
     if (conflictCount > 0) {
-      alert(`⚠️ ${conflictCount} conflit(s) de fusion détecté(s):\n\n${conflictedDocs.join('\n')}\n\nLes données ont été fusionnées automatiquement. Vérifiez le contenu de ces éléments.`)
+      alert(
+        `⚠️ ${conflictCount} conflit(s) de fusion détecté(s):\n\n${conflictedDocs.join('\n')}\n\nLes données ont été fusionnées automatiquement. Vérifiez le contenu de ces éléments.`,
+      )
     }
   } catch (err: any) {
     console.error('Erreur détection conflits:', err)
@@ -595,28 +670,57 @@ const detectConflicts = async () => {
 
 const resolveConflicts = async () => {
   try {
-    const result = await storage.value.allDocs({
+    // Résoudre les conflits des posts
+    const postsResult = await postsDB.value.allDocs({
       include_docs: true,
-      conflicts: true
+      conflicts: true,
     })
 
-    for (const row of result.rows) {
+    // Filtrer les documents système
+    const validPostRows = postsResult.rows.filter((row: any) => !row.id.startsWith('_'))
+    for (const row of validPostRows) {
       if (row.doc._conflicts && row.doc._conflicts.length > 0) {
-        console.log('=> Résolution du conflit sur:', row.doc._id)
+        console.log('=> Résolution du conflit sur post:', row.doc._id)
 
         const losingRevs = row.doc._conflicts
 
-        // Garder la version gagnante (plus récente selon PouchDB)
-        // Supprimer les révisions perdantes
         for (const conflictRev of losingRevs) {
           try {
-            await storage.value.remove({
+            await postsDB.value.remove({
               _id: row.doc._id,
-              _rev: conflictRev
+              _rev: conflictRev,
             })
-            console.log('✓ Conflit résolu pour:', row.doc._id)
+            console.log('✓ Conflit post résolu pour:', row.doc._id)
           } catch (err: any) {
-            console.error('Erreur suppression conflit:', err)
+            console.error('Erreur suppression conflit post:', err)
+          }
+        }
+      }
+    }
+
+    // Résoudre les conflits des commentaires
+    const commentsResult = await commentsDB.value.allDocs({
+      include_docs: true,
+      conflicts: true,
+    })
+
+    // Filtrer les documents système
+    const validCommentRows = commentsResult.rows.filter((row: any) => !row.id.startsWith('_'))
+    for (const row of validCommentRows) {
+      if (row.doc._conflicts && row.doc._conflicts.length > 0) {
+        console.log('=> Résolution du conflit sur commentaire:', row.doc._id)
+
+        const losingRevs = row.doc._conflicts
+
+        for (const conflictRev of losingRevs) {
+          try {
+            await commentsDB.value.remove({
+              _id: row.doc._id,
+              _rev: conflictRev,
+            })
+            console.log('✓ Conflit commentaire résolu pour:', row.doc._id)
+          } catch (err: any) {
+            console.error('Erreur suppression conflit commentaire:', err)
           }
         }
       }
@@ -634,8 +738,10 @@ const searchReset = () => {
 
 const toggle = () => {
   if (!offlineMode.value) {
-    sync.value.cancel()
-    sync.value = null
+    postsSync.value.cancel()
+    commentsSync.value.cancel()
+    postsSync.value = null
+    commentsSync.value = null
     offlineMode.value = true
     syncStatus.value = '📵 Mode hors ligne (simulation)'
     isOnline.value = false
@@ -682,7 +788,12 @@ const trackLocalChange = () => {
       {{ syncStatus }}
     </label>
     <label v-else style="color: red; font-weight: bold"> 🔴 {{ syncStatus }} </label>
-    <input @click="toggle" type="checkbox" name="toggleSync" :checked="sync != null" />
+    <input
+      @click="toggle"
+      type="checkbox"
+      name="toggleSync"
+      :checked="postsSync != null && commentsSync != null"
+    />
     <label for="toggleSync">Toggle Sync</label>
 
     <span v-if="lastSyncTime && !offlineMode" style="font-size: 0.9em; color: #999">
