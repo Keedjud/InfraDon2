@@ -1,11 +1,14 @@
 <script setup lang="ts">
+// Application de gestion de posts et commentaires avec PouchDB/CouchDB
+// 2 bases séparées : posts et comments (pour meilleures performances)
+// Sync bidirectionnelle en temps réel + mode offline
+
 import PouchDB from 'pouchdb'
 import { onMounted, ref } from 'vue'
 import findPlugin from 'pouchdb-find'
 PouchDB.plugin(findPlugin)
 
-// ===== INTERFACES =====
-declare interface Comment {
+interface Comment {
   _id: string
   _rev?: string
   postId: string
@@ -15,7 +18,7 @@ declare interface Comment {
   creation_date: string
 }
 
-declare interface Post {
+interface Post {
   _id: string
   _rev?: string
   type: 'post'
@@ -23,11 +26,18 @@ declare interface Post {
   content: string
   likes: number
   comments?: Comment[]
+  commentCount?: number
   creation_date: string
   updated_date: string
+  _attachments?: Record<string, {
+    content_type: string
+    data?: string | Blob
+    stub?: boolean
+    length?: number
+  }>
 }
 
-// ===== VARIABLES =====
+// Connexions aux bases de données
 const postsDB = ref()
 const commentsDB = ref()
 const postsUrl = 'http://inoe.wenger:IWtramp54HEIG/@localhost:5984/infradon_inoe_posts/'
@@ -36,13 +46,17 @@ const opts = { live: true, retry: true }
 const postsData = ref<Post[]>([])
 const postsSync = ref()
 const commentsSync = ref()
-const replicationStatus = ref<string>('En attente...')
-const isReplicating = ref<boolean>(false)
-const isOnline = ref<boolean>(true)
-const syncStatus = ref<string>('Synchronisé')
-const lastSyncTime = ref<string>('')
-const offlineMode = ref<boolean>(false)
-const offlineChanges = ref<number>(0)
+const replicationStatus = ref('En attente...')
+const isOnline = ref(true)
+const syncStatus = ref('Synchronisé')
+const lastSyncTime = ref('')
+const offlineMode = ref(false)
+
+const currentPage = ref(0)
+const postsPerPage = ref(10)
+const totalPosts = ref(0)
+const hasMorePosts = ref(true)
+const isLoading = ref(false)
 
 onMounted(() => {
   console.log('=> Composant initialisé')
@@ -61,6 +75,7 @@ const initDatabase = async () => {
     commentsDB.value = localCommentsDB
 
     await createIndexes()
+    await createDesignDocuments() // Créer les vues MapReduce
     replicateFromServer()
   } else {
     console.warn('Something went wrong')
@@ -69,8 +84,10 @@ const initDatabase = async () => {
 
 const replicateFromServer = () => {
   console.log('=> Début de la réplication depuis le serveur')
-  isReplicating.value = true
   replicationStatus.value = '⏳ Réplication en cours...'
+
+  // Tout répliquer pour mode offline complet
+  // Pour projet réel avec beaucoup de données : envisager filtrage
 
   let postsReplicationDone = false
   let commentsReplicationDone = false
@@ -78,8 +95,7 @@ const replicateFromServer = () => {
   const checkBothComplete = () => {
     if (postsReplicationDone && commentsReplicationDone) {
       console.log('Réplication des 2 bases complète')
-      isReplicating.value = false
-      replicationStatus.value = '✅ Synchronisation complète (posts + commentaires)'
+      replicationStatus.value = '✅ Synchronisation complète'
       fetchData()
       syncData()
     }
@@ -97,26 +113,24 @@ const replicateFromServer = () => {
       postsReplicationDone = true
       checkBothComplete()
     })
-    .on('error', (err: any) => {
+    .on('error', (err: Error) => {
       console.error('Erreur réplication posts :', err)
-      isReplicating.value = false
       replicationStatus.value = 'Erreur posts : ' + err.message
     })
 
   // Réplication des commentaires
   commentsDB.value.replicate
     .from(commentsUrl)
-    .on('change', (info: any) => {
+    .on('change', (info: { docs_read: number }) => {
       console.log('=> Commentaires : ' + info.docs_read + ' documents lus')
     })
-    .on('complete', (info: any) => {
+    .on('complete', (info: { docs_read: number }) => {
       console.log('Réplication commentaires complète :', info.docs_read + ' documents')
       commentsReplicationDone = true
       checkBothComplete()
     })
-    .on('error', (err: any) => {
+    .on('error', (err: Error) => {
       console.error('Erreur réplication commentaires :', err)
-      isReplicating.value = false
       replicationStatus.value = 'Erreur commentaires : ' + err.message
     })
 }
@@ -126,6 +140,10 @@ const syncData = () => {
     console.log('=> Pas de sync (mode hors ligne activé)')
     return
   }
+
+  // sync() = bidirectionnel (local <-> serveur) en temps réel
+  // live:true = surveille les changements en continu
+  // retry:true = reconnexion automatique si perte de connexion
 
   console.log('=> Lancement de la synchronisation bidirectionnelle (2 bases)')
 
@@ -173,39 +191,38 @@ const syncData = () => {
     })
 }
 
-const search = (event: any) => {
-  event.target.blur()
+const searchQuery = ref('')
 
-  const query = event.target.value.trim()
-
-  if (query === '') {
-    fetchData()
+const search = async () => {
+  if (!searchQuery.value.trim()) {
+    await fetchData(0, postsPerPage.value)
     return
   }
 
-  console.log('=> Recherche sur :', query)
+  isLoading.value = true
 
-  postsDB.value
-    .find({
+  try {
+    const result = await postsDB.value.find({
       selector: {
-        $or: [{ title: { $regex: query } }, { content: { $regex: query } }],
+        $or: [
+          { title: { $regex: searchQuery.value.trim() } },
+          { content: { $regex: searchQuery.value.trim() } }
+        ],
       },
     })
-    .then(async (result: any) => {
-      console.log('=> Résultats trouvés :', result.docs.length)
-      const postsWithComments = await attachComments(result.docs)
-      postsData.value = postsWithComments as Post[]
-    })
-    .catch((error: any) => {
-      console.error('Erreur lors de la recherche :', error)
-    })
+
+    const postsWithComments = await attachLastComment(result.docs)
+    postsData.value = postsWithComments
+  } catch (error) {
+    console.error('Erreur lors de la recherche :', error)
+  }
+
+  isLoading.value = false
 }
 
 const createIndexes = async () => {
-  console.log('=> Création des indexes')
-
+  // Index nécessaires pour la recherche avec find()
   try {
-    // Index pour la base posts
     await postsDB.value.createIndex({ index: { fields: ['title'] } })
     console.log("Index posts 'title' créé")
 
@@ -226,257 +243,332 @@ const createIndexes = async () => {
   }
 }
 
-const sortByLikes = (): any => {
-  console.log('=> Tri par nombre de likes')
+// Vues MapReduce pour optimiser les requêtes
+// Plus rapide que allDocs car indexé et mis en cache
+const createDesignDocuments = async () => {
+  console.log('=> Création des design documents (vues MapReduce)')
 
-  postsDB.value
-    .find({
-      selector: {
-        likes: { $gte: 0 },
+  // Vue posts : tri par likes et par date
+  const postsByLikesView: any = {
+    _id: '_design/posts_views',
+    views: {
+      by_likes: {
+        map: `function(doc) {
+          if (doc.type === 'post') {
+            emit(doc.likes, doc);
+          }
+        }`.toString(),
       },
-      sort: [{ likes: 'desc' }],
-    })
-    .then(async (result: any) => {
-      console.log('=> Posts triés par likes :', result.docs.length)
-      const postsWithComments = await attachComments(result.docs)
-      postsData.value = postsWithComments as Post[]
-    })
-    .catch((error: any) => {
-      console.error('Erreur lors du tri :', error)
-    })
-}
+      by_date: {
+        map: `function(doc) {
+          if (doc.type === 'post') {
+            emit(doc.creation_date, doc);
+          }
+        }`.toString(),
+      },
+      count_posts: {
+        map: `function(doc) {
+          if (doc.type === 'post') {
+            emit(doc._id, 1);
+          }
+        }`.toString(),
+        reduce: '_count',
+      },
+    },
+  }
 
-const fetchData = async (posts?: Post[]): Promise<any> => {
-  // Si pas de posts en paramètre, récupérer les posts de la base
-  if (!posts) {
-    postsDB.value
-      .allDocs({ include_docs: true })
-      .then(async (result: any) => {
-        // Filtrer les documents système (_design, _local)
-        const validRows = result.rows.filter((row: any) => !row.id.startsWith('_'))
-        console.log('=> Posts récupérés :', validRows.length)
-        posts = validRows.map((row: any) => row.doc) as Post[]
+  // Vue commentaires : récupérer par post + date
+  const commentsByPostView: any = {
+    _id: '_design/comments_views',
+    views: {
+      by_post_and_date: {
+        map: `function(doc) {
+          if (doc.type === 'comment') {
+            emit([doc.postId, doc.creation_date], doc);
+          }
+        }`.toString(),
+      },
+      count_by_post: {
+        map: `function(doc) {
+          if (doc.type === 'comment') {
+            emit(doc.postId, 1);
+          }
+        }`.toString(),
+        reduce: '_count',
+      },
+    },
+  }
 
-        // Ajouter les commentaires
-        const postsWithComments = await attachComments(posts)
-        postsData.value = postsWithComments as Post[]
-      })
-      .catch((error: any) => {
-        console.error('Erreur lors de la récupération des données :', error)
-      })
+  try {
+    // Créer ou mettre à jour la vue des posts
+    try {
+      const existingPostsView = await postsDB.value.get('_design/posts_views')
+      postsByLikesView._rev = existingPostsView._rev
+      await postsDB.value.put(postsByLikesView)
+      console.log('Vue posts_views mise à jour')
+    } catch (err: any) {
+      if (err.status === 404) {
+        await postsDB.value.put(postsByLikesView)
+        console.log('Vue posts_views créée')
+      }
+    }
+
+    // Créer ou mettre à jour la vue des commentaires
+    try {
+      const existingCommentsView = await commentsDB.value.get('_design/comments_views')
+      commentsByPostView._rev = existingCommentsView._rev
+      await commentsDB.value.put(commentsByPostView)
+      console.log('Vue comments_views mise à jour')
+    } catch (err: any) {
+      if (err.status === 404) {
+        await commentsDB.value.put(commentsByPostView)
+        console.log('Vue comments_views créée')
+      }
+    }
+  } catch (err: any) {
+    console.error('Erreur création design documents:', err)
   }
 }
 
-// Fonction utilitaire pour ajouter les commentaires aux posts
-const attachComments = async (posts: Post[]): Promise<Post[]> => {
+// Top 10 posts likés avec pagination
+const fetchTopLikedPosts = async (page: number = 0): Promise<any> => {
+  console.log(`=> Récupération des 10 posts les plus likés (page ${page})`)
+  isLoading.value = true
+  currentPage.value = page
+
+  try {
+    const skip = page * postsPerPage.value
+    const result = await postsDB.value.query('posts_views/by_likes', {
+      descending: true,
+      skip: skip,
+      limit: postsPerPage.value,
+      include_docs: false,
+    })
+
+    console.log(`=> ${result.rows.length} posts récupérés (skip: ${skip})`)
+    const posts = result.rows.map((row: any) => row.value) as Post[]
+    hasMorePosts.value = result.rows.length === postsPerPage.value
+
+    const postsWithComments = await attachLastComment(posts)
+    postsData.value = postsWithComments as Post[]
+  } catch (error: any) {
+    console.error('Erreur fetchTopLikedPosts:', error)
+  }
+
+  isLoading.value = false
+}
+
+const nextPage = () => {
+  if (hasMorePosts.value) {
+    fetchTopLikedPosts(currentPage.value + 1)
+  }
+}
+
+const previousPage = () => {
+  if (currentPage.value > 0) {
+    fetchTopLikedPosts(currentPage.value - 1)
+  }
+}
+
+const resetPagination = () => {
+  currentPage.value = 0
+  fetchData(0, postsPerPage.value)
+}
+
+// Charger les posts avec pagination via vue MapReduce
+// Évite allDocs() qui charge tout en mémoire
+const fetchData = async (skip: number = 0, limit: number = 10): Promise<any> => {
+  isLoading.value = true
+
+  try {
+    // Vue 'by_date' pour posts triés par date (plus récents en premier)
+    const result = await postsDB.value.query('posts_views/by_date', {
+      descending: true,
+      skip: skip,
+      limit: limit,
+      include_docs: false,
+    })
+
+    const posts = result.rows.map((row: any) => row.value) as Post[]
+
+    // Vérifier s'il y a plus de posts
+    hasMorePosts.value = result.rows.length === limit
+
+    // Ajouter les commentaires (optimisé pour ne charger que le dernier)
+    const postsWithComments = await attachLastComment(posts)
+    postsData.value = postsWithComments as Post[]
+
+    totalPosts.value = result.total_rows || posts.length
+  } catch (error: any) {
+    console.error('Erreur lors de la récupération des données :', error)
+    // Fallback : Si les vues n'existent pas encore, utiliser find()
+    console.warn('Fallback : Utilisation de find() au lieu de query()')
+    const fallbackResult = await postsDB.value.find({
+      selector: { type: 'post' },
+      sort: [{ creation_date: 'desc' }],
+      skip: skip,
+      limit: limit,
+    })
+    const postsWithComments = await attachLastComment(fallbackResult.docs)
+    postsData.value = postsWithComments as Post[]
+  }
+
+  isLoading.value = false
+}
+
+// Charger uniquement le dernier commentaire par défaut
+// Gain de performance : évite de charger 100 comments si pas nécessaire
+const attachLastComment = async (posts: Post[]): Promise<Post[]> => {
   const results = await Promise.all(
-    posts.map((post) =>
-      commentsDB.value
-        .find({
-          selector: {
-            postId: post._id,
-          },
+    posts.map(async (post) => {
+      try {
+        const commentsResult = await commentsDB.value.query('comments_views/by_post_and_date', {
+          startkey: [post._id, {}],
+          endkey: [post._id],
+          descending: true,
+          limit: 1,
+          include_docs: false,
         })
-        .then((commentsResult: any) => ({
+
+        const countResult = await commentsDB.value.query('comments_views/count_by_post', {
+          key: post._id,
+          reduce: true,
+        })
+
+        const lastComment = commentsResult.rows.length > 0 ? commentsResult.rows[0].value : null
+        const commentCount = countResult.rows.length > 0 ? countResult.rows[0].value : 0
+
+        return {
           ...post,
-          comments: commentsResult.docs as Comment[],
-        })),
-    ),
+          comments: lastComment ? [lastComment] : [],
+          commentCount: commentCount,
+        }
+      } catch (err: any) {
+        console.error('Erreur attachLastComment pour post', post._id, err)
+        return { ...post, comments: [], commentCount: 0 }
+      }
+    }),
   )
   return results
 }
 
-const createDoc = (): any => {
-  // Récupérer les valeurs des inputs
-  const titleInput = document.querySelector('.input-title') as HTMLInputElement
-  const contentInput = document.querySelector('.input-content') as HTMLInputElement
+const newPostTitle = ref('')
+const newPostContent = ref('')
 
-  const title = titleInput?.value.trim()
-  const content = contentInput?.value.trim()
-
-  // Validation
-  if (!title || !content) {
+const createDoc = async () => {
+  if (!newPostTitle.value.trim() || !newPostContent.value.trim()) {
     console.warn('Titre et contenu sont obligatoires')
     return
   }
 
-  console.log("=> Création d'un nouveau post")
-
   const newPost: Post = {
     _id: `post_${Date.now()}`,
     type: 'post',
-    title: title,
-    content: content,
+    title: newPostTitle.value.trim(),
+    content: newPostContent.value.trim(),
     likes: 0,
     creation_date: new Date().toISOString(),
     updated_date: new Date().toISOString(),
   }
 
-  postsDB.value
-    .post(newPost)
-    .then((response: any) => {
-      console.log('Post créé :', response)
-      titleInput.value = ''
-      contentInput.value = ''
-      trackLocalChange()
-      fetchData()
-    })
-    .catch((err: any) => {
-      console.error('Erreur création post :', err)
-    })
+  try {
+    await postsDB.value.post(newPost)
+    newPostTitle.value = ''
+    newPostContent.value = ''
+    await fetchData(0, postsPerPage.value)
+  } catch (err) {
+    console.error('Erreur création post :', err)
+  }
 }
 
-const deleteDoc = (post: Post): any => {
-  console.log('=> Suppression du post:', post._id)
-
-  postsDB.value
-    .remove(post)
-    .then((response: any) => {
-      console.log('Post supprimé :', response)
-      trackLocalChange()
-      fetchData()
-    })
-    .catch((err: any) => {
-      console.error('Erreur suppression post :', err)
-    })
+const deleteDoc = async (post: Post) => {
+  try {
+    await postsDB.value.remove(post)
+    await fetchData(0, postsPerPage.value)
+  } catch (err) {
+    console.error('Erreur suppression post :', err)
+  }
 }
 
-const updateDoc = (post: Post): any => {
-  // Récupérer les nouvelles valeurs
+const updateDoc = async (post: Post) => {
   const newTitle = prompt('Nouveau titre:', post.title)
-  if (newTitle === null) return
+  if (!newTitle?.trim()) return
 
   const newContent = prompt('Nouveau contenu:', post.content)
-  if (newContent === null) return
+  if (!newContent?.trim()) return
 
-  // Validation
-  if (!newTitle.trim() || !newContent.trim()) {
-    console.warn('Titre et contenu sont obligatoires')
-    return
-  }
-
-  console.log('=> Modification du post:', post._id)
-
-  // Modifier le post
   post.title = newTitle.trim()
   post.content = newContent.trim()
   post.updated_date = new Date().toISOString()
 
-  postsDB.value
-    .put(post)
-    .then((response: any) => {
-      console.log('Post modifié :', response)
-      trackLocalChange()
-      fetchData()
-    })
-    .catch((err: any) => {
-      console.error('Erreur modification post :', err)
-    })
+  try {
+    await postsDB.value.put(post)
+    await fetchData(0, postsPerPage.value)
+  } catch (err) {
+    console.error('Erreur modification post :', err)
+  }
 }
 
-// ===== SYSTÈME DE LIKES =====
-const toggleLike = (post: Post): any => {
-  console.log('=> Toggle like sur post:', post._id)
-
-  // Incrémenter le compteur
+const toggleLike = async (post: Post) => {
   post.likes++
   post.updated_date = new Date().toISOString()
 
-  postsDB.value
-    .put(post)
-    .then((response: any) => {
-      console.log('Post liké :', response)
-      trackLocalChange()
-      fetchData()
-    })
-    .catch((err: any) => {
-      console.error('Erreur modification like :', err)
-    })
+  try {
+    await postsDB.value.put(post)
+    await fetchData(0, postsPerPage.value)
+  } catch (err) {
+    console.error('Erreur modification like :', err)
+  }
 }
 
-// ===== SYSTÈME DE COMMENTAIRES =====
-const addComment = (post: Post): any => {
-  // Récupérer le contenu du commentaire depuis l'input
-  const commentInput = document.querySelector(`.comment-input-${post._id}`) as HTMLInputElement
-  const commentContent = commentInput?.value.trim()
+const commentInputs = ref<Record<string, string>>({})
 
-  // Validation
-  if (!commentContent) {
-    console.warn('Le commentaire ne peut pas être vide')
-    return
-  }
+const addComment = async (post: Post) => {
+  const content = commentInputs.value[post._id]?.trim()
+  if (!content) return
 
-  console.log("=> Ajout d'un commentaire au post:", post._id)
-
-  // Créer le nouveau commentaire
   const newComment: Comment = {
     _id: `comment_${Date.now()}`,
     postId: post._id,
-    content: commentContent,
+    content,
     author: 'Toi',
     type: 'comment',
     creation_date: new Date().toISOString(),
   }
 
-  // Sauvegarder le commentaire
-  commentsDB.value
-    .post(newComment)
-    .then((response: any) => {
-      console.log('Commentaire ajouté :', response)
-      commentInput.value = ''
-      trackLocalChange()
-      fetchData()
-    })
-    .catch((err: any) => {
-      console.error('Erreur ajout commentaire :', err)
-    })
-}
-
-const deleteComment = (post: Post, comment: Comment): any => {
-  console.log('=> Suppression du commentaire:', comment._id)
-
-  // Supprimer le commentaire
-  commentsDB.value
-    .remove(comment)
-    .then((response: any) => {
-      console.log('Commentaire supprimé :', response)
-      trackLocalChange()
-      fetchData()
-    })
-    .catch((err: any) => {
-      console.error('Erreur suppression commentaire :', err)
-    })
-}
-
-const updateComment = (post: Post, comment: Comment): any => {
-  console.log('=> Modification du commentaire:', comment._id)
-
-  // Récupérer le nouveau contenu
-  const newContent = prompt('Nouveau contenu du commentaire:', comment.content)
-  if (newContent === null) return
-
-  // Validation
-  if (!newContent.trim()) {
-    console.warn('Le commentaire ne peut pas être vide')
-    return
+  try {
+    await commentsDB.value.post(newComment)
+    commentInputs.value[post._id] = ''
+    await fetchData(currentPage.value * postsPerPage.value, postsPerPage.value)
+  } catch (err) {
+    console.error('Erreur ajout commentaire :', err)
   }
+}
 
-  // Modifier le commentaire
+const deleteComment = async (post: Post, comment: Comment) => {
+  try {
+    await commentsDB.value.remove(comment)
+    await fetchData(currentPage.value * postsPerPage.value, postsPerPage.value)
+  } catch (err) {
+    console.error('Erreur suppression commentaire :', err)
+  }
+}
+
+const updateComment = async (post: Post, comment: Comment) => {
+  const newContent = prompt('Nouveau contenu du commentaire:', comment.content)
+  if (!newContent?.trim()) return
+
   comment.content = newContent.trim()
 
-  commentsDB.value
-    .put(comment)
-    .then((response: any) => {
-      console.log('Commentaire modifié :', response)
-      trackLocalChange()
-      fetchData()
-    })
-    .catch((err: any) => {
-      console.error('Erreur modification commentaire :', err)
-    })
+  try {
+    await commentsDB.value.put(comment)
+    await fetchData(currentPage.value * postsPerPage.value, postsPerPage.value)
+  } catch (err) {
+    console.error('Erreur modification commentaire :', err)
+  }
 }
 
-// ===== FACTORY - GÉNÉRER DONNÉES TEST =====
+// Générer 15 posts et commentaires aléatoires pour tester
 const generateTestData = async () => {
   console.log('=> Génération des données de test...')
 
@@ -513,7 +605,6 @@ const generateTestData = async () => {
     'Bien dit',
   ]
 
-  // ===== ÉTAPE 1 : CRÉER ET SAUVEGARDER LES POSTS =====
   const postIds: string[] = []
 
   for (let i = 0; i < 15; i++) {
@@ -540,7 +631,6 @@ const generateTestData = async () => {
 
   console.log('=> ' + postIds.length + ' posts créés')
 
-  // ===== ÉTAPE 2 : CRÉER ET SAUVEGARDER LES COMMENTAIRES INDÉPENDANTS =====
   let totalComments = 0
 
   for (let i = 0; i < postIds.length; i++) {
@@ -567,10 +657,10 @@ const generateTestData = async () => {
 
   console.log('=> ' + totalComments + ' commentaires créés')
   console.log('=> Génération terminée')
-  fetchData()
+  fetchData(0, postsPerPage.value)
 }
 
-// ===== SUPPRIMER TOUS LES POSTS =====
+// Supprimer tous les posts et commentaires
 const deleteAllPosts = async () => {
   if (!confirm('Êtes-vous sûr ? Tous les posts seront supprimés !')) {
     return
@@ -611,60 +701,9 @@ const deleteAllPosts = async () => {
     postsData.value = []
 
     // Rafraîchir l'affichage
-    await fetchData()
+    await fetchData(0, postsPerPage.value)
   } catch (err: any) {
     console.error('Erreur suppression posts:', err)
-  }
-}
-
-// ===== GESTION DES CONFLITS =====
-const detectConflicts = async () => {
-  try {
-    // Vérifier les conflits dans les posts
-    const postsResult = await postsDB.value.allDocs({
-      include_docs: true,
-      conflicts: true,
-    })
-
-    // Vérifier les conflits dans les commentaires
-    const commentsResult = await commentsDB.value.allDocs({
-      include_docs: true,
-      conflicts: true,
-    })
-
-    let conflictCount = 0
-    const conflictedDocs: string[] = []
-
-    // Filtrer les documents système
-    const validPostRows = postsResult.rows.filter((row: any) => !row.id.startsWith('_'))
-    validPostRows.forEach((row: any) => {
-      if (row.doc._conflicts && row.doc._conflicts.length > 0) {
-        conflictCount++
-        conflictedDocs.push('Post: ' + (row.doc.title || row.doc._id))
-        console.warn('⚠️ CONFLIT DÉTECTÉ sur post:', row.doc._id)
-        console.warn('  Révision gagnante:', row.doc._rev)
-        console.warn('  Révisions perdantes:', row.doc._conflicts)
-      }
-    })
-
-    const validCommentRows = commentsResult.rows.filter((row: any) => !row.id.startsWith('_'))
-    validCommentRows.forEach((row: any) => {
-      if (row.doc._conflicts && row.doc._conflicts.length > 0) {
-        conflictCount++
-        conflictedDocs.push('Commentaire: ' + row.doc._id)
-        console.warn('⚠️ CONFLIT DÉTECTÉ sur commentaire:', row.doc._id)
-        console.warn('  Révision gagnante:', row.doc._rev)
-        console.warn('  Révisions perdantes:', row.doc._conflicts)
-      }
-    })
-
-    if (conflictCount > 0) {
-      alert(
-        `⚠️ ${conflictCount} conflit(s) de fusion détecté(s):\n\n${conflictedDocs.join('\n')}\n\nLes données ont été fusionnées automatiquement. Vérifiez le contenu de ces éléments.`,
-      )
-    }
-  } catch (err: any) {
-    console.error('Erreur détection conflits:', err)
   }
 }
 
@@ -731,9 +770,8 @@ const resolveConflicts = async () => {
 }
 
 const searchReset = () => {
-  const searchInput = document.querySelector('.search') as HTMLInputElement
-  if (searchInput) searchInput.value = ''
-  fetchData()
+  searchQuery.value = ''
+  fetchData(0, postsPerPage.value)
 }
 
 const toggle = () => {
@@ -743,32 +781,106 @@ const toggle = () => {
     postsSync.value = null
     commentsSync.value = null
     offlineMode.value = true
-    syncStatus.value = '📵 Mode hors ligne (simulation)'
+    syncStatus.value = '📵 Mode hors ligne'
     isOnline.value = false
-    offlineChanges.value = 0
-    console.log('=> Sync arrêtée - Mode hors ligne activé')
   } else {
-    // Réactiver la sync
     offlineMode.value = false
-    offlineChanges.value = 0
     syncStatus.value = '🔄 Reconnexion...'
     syncData()
 
     setTimeout(async () => {
-      await detectConflicts()
-      fetchData()
+      await resolveConflicts()
+      await fetchData(0, postsPerPage.value)
     }, 2000)
-
-    console.log('=> Mode hors ligne désactivé - Sync réactivée')
   }
 }
 
-// ===== MODE HORS LIGNE (SIMULATION VIA TOGGLE) =====
-const trackLocalChange = () => {
-  if (offlineMode.value) {
-    offlineChanges.value++
-    console.log('=> Changement local enregistré (non synchronisé):', offlineChanges.value)
+
+
+// Charger tous les commentaires d'un post à la demande
+const loadAllComments = async (post: Post): Promise<void> => {
+  try {
+    const result = await commentsDB.value.query('comments_views/by_post_and_date', {
+      startkey: [post._id, {}],
+      endkey: [post._id],
+      descending: true,
+      include_docs: false,
+    })
+
+    const allComments = result.rows.map((row: any) => row.value) as Comment[]
+
+    const postIndex = postsData.value.findIndex((p) => p._id === post._id)
+    if (postIndex !== -1 && postsData.value[postIndex]) {
+      postsData.value[postIndex]!.comments = allComments
+    }
+  } catch (err) {
+    console.error('Erreur chargement commentaires:', err)
   }
+}
+
+// Ajouter un fichier (image/vidéo) à un post
+const addAttachment = async (post: Post): Promise<void> => {
+  const input = document.createElement('input')
+  input.type = 'file'
+  input.accept = 'image/*,video/*'
+
+  input.onchange = async (e: any) => {
+    const file = e.target?.files?.[0]
+    if (!file) return
+
+    console.log('Fichier sélectionné:', file.name, file.type, file.size)
+
+    if (file.size > 5 * 1024 * 1024) {
+      alert('⚠️ Fichier trop volumineux (max 5MB). Pour des fichiers plus gros, utilisez un service cloud.')
+      return
+    }
+
+    try {
+      const latestPost = await postsDB.value.get(post._id)
+
+      const response = await postsDB.value.putAttachment(
+        latestPost._id,
+        file.name,
+        latestPost._rev!,
+        file,
+        file.type,
+      )
+
+      console.log('Attachment ajouté:', response)
+      await fetchData(currentPage.value * postsPerPage.value, postsPerPage.value)
+    } catch (err: any) {
+      console.error('Erreur ajout attachment:', err)
+      alert('Erreur lors de l\'ajout du fichier: ' + err.message)
+    }
+  }
+
+  input.click()
+}
+
+const removeAttachment = async (post: Post, attachmentName: string): Promise<void> => {
+  if (!confirm(`Supprimer le fichier "${attachmentName}" ?`)) {
+    return
+  }
+
+  try {
+    const latestPost = await postsDB.value.get(post._id)
+
+    const response = await postsDB.value.removeAttachment(
+      latestPost._id,
+      attachmentName,
+      latestPost._rev!,
+    )
+
+    console.log('Attachment supprimé:', response)
+    await fetchData(currentPage.value * postsPerPage.value, postsPerPage.value)
+  } catch (err: any) {
+    console.error('Erreur suppression attachment:', err)
+    alert('Erreur lors de la suppression: ' + err.message)
+  }
+}
+
+const getAttachmentUrl = (post: Post, attachmentName: string): string => {
+  return `${postsDB.value.name}/${post._id}/${attachmentName}`
 }
 </script>
 
@@ -799,25 +911,35 @@ const trackLocalChange = () => {
     <span v-if="lastSyncTime && !offlineMode" style="font-size: 0.9em; color: #999">
       (Dernière sync: {{ lastSyncTime }})
     </span>
-
-    <span
-      v-if="offlineMode && offlineChanges > 0"
-      style="font-size: 0.9em; color: #ff6b6b; font-weight: bold"
-    >
-      | ⚠️ {{ offlineChanges }} changement(s) en attente
-    </span>
   </div>
   <div>
-    <input type="text" placeholder="Search" @keyup.enter="search" class="search" />
+    <input type="text" v-model="searchQuery" placeholder="Search" @keyup.enter="search" class="search" />
     <button @click="searchReset">✕ Réinitialiser</button>
-    <button @click="sortByLikes" class="btn-sort">📊 Trier par likes</button>
+    <button @click="fetchTopLikedPosts(0)" class="btn-sort">🔥 Top 10 likés</button>
+    <button @click="resetPagination" class="btn-sort">🔄 Tous les posts</button>
+  </div>
+
+  <!-- CONTRÔLES DE PAGINATION -->
+  <div class="pagination-controls" v-if="!isLoading">
+    <button @click="previousPage" :disabled="currentPage === 0" class="btn-pagination">
+      ← Précédent
+    </button>
+    <span class="page-info">Page {{ currentPage + 1 }}</span>
+    <button @click="nextPage" :disabled="!hasMorePosts" class="btn-pagination">
+      Suivant →
+    </button>
+  </div>
+
+  <!-- INDICATEUR DE CHARGEMENT -->
+  <div v-if="isLoading" class="loading-indicator">
+    <p>⏳ Chargement en cours...</p>
   </div>
 
   <!-- SECTION CRÉATION POST -->
   <div class="create-section">
     <h2>📝 Créer un post</h2>
-    <input type="text" class="input-title" placeholder="Titre du post" />
-    <textarea class="input-content" placeholder="Contenu du post"></textarea>
+    <input type="text" v-model="newPostTitle" placeholder="Titre du post" />
+    <textarea v-model="newPostContent" placeholder="Contenu du post"></textarea>
     <button @click="createDoc" class="btn-primary">➕ Ajouter un post</button>
     <button @click="generateTestData" class="btn-secondary">
       🧪 Générer données test (15 posts)
@@ -834,6 +956,44 @@ const trackLocalChange = () => {
     <div class="post-actions">
       <button @click="updateDoc(post)" class="btn-small">✏️ Modifier</button>
       <button @click="deleteDoc(post)" class="btn-small-danger">🗑️ Supprimer</button>
+      <button @click="addAttachment(post)" class="btn-small-media">📎 Ajouter média</button>
+    </div>
+
+    <!-- SECTION MÉDIAS/ATTACHMENTS -->
+    <div v-if="post._attachments && Object.keys(post._attachments).length > 0" class="media-section">
+      <h4>🖼️ Médias attachés ({{ Object.keys(post._attachments).length }})</h4>
+      <div class="media-grid">
+        <div
+          v-for="(attachment, filename) in post._attachments"
+          :key="filename"
+          class="media-item"
+        >
+          <!-- Afficher l'image si c'est une image -->
+          <img
+            v-if="attachment.content_type?.startsWith('image/')"
+            :src="getAttachmentUrl(post, filename as string)"
+            :alt="filename as string"
+            class="media-image"
+          />
+          <!-- Afficher un placeholder pour les vidéos -->
+          <div v-else-if="attachment.content_type?.startsWith('video/')" class="media-video">
+            <video controls class="media-video-player">
+              <source :src="getAttachmentUrl(post, filename as string)" :type="attachment.content_type" />
+              Votre navigateur ne supporte pas la vidéo.
+            </video>
+          </div>
+          <!-- Placeholder pour autres types -->
+          <div v-else class="media-file">
+            📄 {{ filename }}
+          </div>
+          <div class="media-info">
+            <p class="media-filename">{{ filename }}</p>
+            <button @click="removeAttachment(post, filename as string)" class="btn-remove-media">
+              🗑️
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- BOUTON LIKES -->
@@ -841,7 +1001,19 @@ const trackLocalChange = () => {
 
     <!-- SECTION COMMENTAIRES -->
     <div class="comments-section">
-      <h3>💬 Commentaires ({{ (post.comments ?? []).length }})</h3>
+      <h3>
+        💬 Commentaires
+        <span v-if="post.commentCount !== undefined" class="comment-count">
+          ({{ post.commentCount }} au total)
+        </span>
+        <span v-else class="comment-count">({{ (post.comments ?? []).length }})</span>
+      </h3>
+
+      <!-- Afficher seulement le dernier commentaire par défaut -->
+      <div v-if="(post.comments ?? []).length === 1 && post.commentCount && post.commentCount > 1">
+        <p class="last-comment-indicator">🔽 Dernier commentaire :</p>
+      </div>
+
       <div v-for="comment in post.comments" :key="comment._id" class="comment">
         <strong>{{ comment.author }}</strong>
         <span class="comment-date">({{ new Date(comment.creation_date).toLocaleString() }})</span>
@@ -849,12 +1021,23 @@ const trackLocalChange = () => {
         <button @click="deleteComment(post, comment)" class="btn-comment-delete">✕</button>
         <button @click="updateComment(post, comment)" class="btn-comment-edit">✏️</button>
       </div>
+
+      <!-- Bouton pour charger tous les commentaires -->
+      <button
+        v-if="post.commentCount && post.commentCount > 1 && (post.comments ?? []).length < post.commentCount"
+        @click="loadAllComments(post)"
+        class="btn-load-comments"
+      >
+        👁️ Voir tous les {{ post.commentCount }} commentaires
+      </button>
+
       <div class="comment-input-wrapper">
         <input
           type="text"
-          :class="`comment-input-${post._id}`"
+          v-model="commentInputs[post._id]"
           placeholder="Ajouter un commentaire"
           class="comment-input"
+          @keyup.enter="addComment(post)"
         />
         <button @click="addComment(post)" class="btn-comment">💬 Commenter</button>
       </div>
@@ -863,19 +1046,6 @@ const trackLocalChange = () => {
 </template>
 
 <style scoped>
-/* ===== VARIABLES COULEURS ===== */
-:root {
-  --primary: #3498db;
-  --primary-dark: #2980b9;
-  --success: #27ae60;
-  --warning: #f39c12;
-  --danger: #e74c3c;
-  --secondary: #9b59b6;
-  --light-bg: #ecf0f1;
-  --border-color: #bdc3c7;
-  --text-muted: #95a5a6;
-}
-
 /* ===== GÉNÉRIQUES ===== */
 body {
   font-family: Arial, sans-serif;
@@ -994,6 +1164,18 @@ button:hover {
 
 .btn-small-danger:hover {
   background-color: #c82333;
+}
+
+.btn-small-media {
+  background-color: #28a745;
+  padding: 6px 10px;
+  font-size: 0.9em;
+  margin-right: 5px;
+  color: white;
+}
+
+.btn-small-media:hover {
+  background-color: #218838;
 }
 
 .btn-like {
@@ -1120,5 +1302,175 @@ button:hover {
 
 .btn-comment-edit:hover {
   background-color: #e0a800;
+}
+
+.btn-load-comments {
+  background-color: #17a2b8;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 8px 12px;
+  cursor: pointer;
+  margin-top: 10px;
+  width: 100%;
+}
+
+.btn-load-comments:hover {
+  background-color: #138496;
+}
+
+/* ===== PAGINATION ===== */
+.pagination-controls {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 15px;
+  margin: 20px 0;
+  padding: 15px;
+  background-color: #f8f9fa;
+  border-radius: 4px;
+}
+
+.btn-pagination {
+  background-color: #007bff;
+  color: white;
+  padding: 10px 20px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: bold;
+}
+
+.btn-pagination:hover:not(:disabled) {
+  background-color: #0056b3;
+}
+
+.btn-pagination:disabled {
+  background-color: #ccc;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.page-info {
+  font-weight: bold;
+  color: #333;
+  padding: 0 10px;
+}
+
+/* ===== INDICATEUR DE CHARGEMENT ===== */
+.loading-indicator {
+  text-align: center;
+  padding: 30px;
+  background-color: #e8f4f8;
+  border-radius: 4px;
+  margin: 20px 0;
+}
+
+.loading-indicator p {
+  color: #2c3e50;
+  font-size: 1.2em;
+  font-weight: bold;
+  margin: 0;
+}
+
+/* ===== COMPTEURS ===== */
+.comment-count {
+  color: #666;
+  font-weight: normal;
+  font-size: 0.9em;
+}
+
+.last-comment-indicator {
+  color: #999;
+  font-size: 0.85em;
+  font-style: italic;
+  margin: 5px 0;
+}
+
+/* ===== MÉDIAS / ATTACHMENTS ===== */
+.media-section {
+  background-color: #f5f5f5;
+  padding: 15px;
+  margin: 15px 0;
+  border-radius: 4px;
+  border: 1px solid #ddd;
+}
+
+.media-section h4 {
+  margin-top: 0;
+  color: #333;
+}
+
+.media-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 15px;
+  margin-top: 10px;
+}
+
+.media-item {
+  background-color: white;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.media-image {
+  width: 100%;
+  height: 200px;
+  object-fit: cover;
+  display: block;
+}
+
+.media-video {
+  width: 100%;
+  background-color: #000;
+}
+
+.media-video-player {
+  width: 100%;
+  height: 200px;
+}
+
+.media-file {
+  width: 100%;
+  height: 200px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #e9ecef;
+  font-size: 2em;
+}
+
+.media-info {
+  padding: 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background-color: #f8f9fa;
+}
+
+.media-filename {
+  margin: 0;
+  font-size: 0.85em;
+  color: #555;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.btn-remove-media {
+  background-color: #dc3545;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 5px 10px;
+  cursor: pointer;
+  font-size: 0.9em;
+}
+
+.btn-remove-media:hover {
+  background-color: #c82333;
 }
 </style>
