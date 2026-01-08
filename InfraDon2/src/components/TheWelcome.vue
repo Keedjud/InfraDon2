@@ -351,6 +351,11 @@ const fetchTopLikedPosts = async (page: number = 0): Promise<any> => {
 
     const postsWithComments = await attachLastComment(posts)
     postsData.value = postsWithComments as Post[]
+
+    // Charger les URLs des attachments
+    for (const post of postsWithComments) {
+      await loadPostAttachments(post)
+    }
   } catch (error: any) {
     console.error('Erreur fetchTopLikedPosts:', error)
   }
@@ -398,6 +403,11 @@ const fetchData = async (skip: number = 0, limit: number = 10): Promise<any> => 
     const postsWithComments = await attachLastComment(posts)
     postsData.value = postsWithComments as Post[]
 
+    // Charger les URLs des attachments
+    for (const post of postsWithComments) {
+      await loadPostAttachments(post)
+    }
+
     totalPosts.value = result.total_rows || posts.length
   } catch (error: any) {
     console.error('Erreur lors de la récupération des données :', error)
@@ -411,6 +421,11 @@ const fetchData = async (skip: number = 0, limit: number = 10): Promise<any> => 
     })
     const postsWithComments = await attachLastComment(fallbackResult.docs)
     postsData.value = postsWithComments as Post[]
+
+    // Charger les URLs des attachments
+    for (const post of postsWithComments) {
+      await loadPostAttachments(post)
+    }
   }
 
   isLoading.value = false
@@ -657,7 +672,7 @@ const generateTestData = async () => {
 
   console.log('=> ' + totalComments + ' commentaires créés')
   console.log('=> Génération terminée')
-  
+
   // Petit délai pour laisser la sync se faire
   await new Promise(resolve => setTimeout(resolve, 500))
   await fetchData(0, postsPerPage.value)
@@ -882,8 +897,38 @@ const removeAttachment = async (post: Post, attachmentName: string): Promise<voi
   }
 }
 
+// Cache pour les URLs blob des attachments
+const attachmentUrls = ref<Record<string, string>>({})
+
+// Charger l'URL d'un attachment et la mettre en cache
+const loadAttachmentUrl = async (post: Post, attachmentName: string) => {
+  const cacheKey = `${post._id}_${attachmentName}`
+
+  if (attachmentUrls.value[cacheKey]) {
+    return
+  }
+
+  try {
+    const blob = await postsDB.value.getAttachment(post._id, attachmentName)
+    const url = URL.createObjectURL(blob)
+    attachmentUrls.value[cacheKey] = url
+  } catch (err) {
+    console.error('Erreur chargement attachment:', err)
+  }
+}
+
 const getAttachmentUrl = (post: Post, attachmentName: string): string => {
-  return `${postsDB.value.name}/${post._id}/${attachmentName}`
+  const cacheKey = `${post._id}_${attachmentName}`
+  return attachmentUrls.value[cacheKey] || ''
+}
+
+// Charger les URLs de tous les attachments d'un post
+const loadPostAttachments = async (post: Post) => {
+  if (post._attachments) {
+    for (const filename of Object.keys(post._attachments)) {
+      await loadAttachmentUrl(post, filename)
+    }
+  }
 }
 </script>
 
@@ -971,21 +1016,18 @@ const getAttachmentUrl = (post: Post, attachmentName: string): string => {
           :key="filename"
           class="media-item"
         >
-          <!-- Afficher l'image si c'est une image -->
           <img
             v-if="attachment.content_type?.startsWith('image/')"
             :src="getAttachmentUrl(post, filename as string)"
             :alt="filename as string"
             class="media-image"
           />
-          <!-- Afficher un placeholder pour les vidéos -->
           <div v-else-if="attachment.content_type?.startsWith('video/')" class="media-video">
             <video controls class="media-video-player">
               <source :src="getAttachmentUrl(post, filename as string)" :type="attachment.content_type" />
               Votre navigateur ne supporte pas la vidéo.
             </video>
           </div>
-          <!-- Placeholder pour autres types -->
           <div v-else class="media-file">
             📄 {{ filename }}
           </div>
