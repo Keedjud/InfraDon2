@@ -657,7 +657,10 @@ const generateTestData = async () => {
 
   console.log('=> ' + totalComments + ' commentaires créés')
   console.log('=> Génération terminée')
-  fetchData(0, postsPerPage.value)
+  
+  // Petit délai pour laisser la sync se faire
+  await new Promise(resolve => setTimeout(resolve, 500))
+  await fetchData(0, postsPerPage.value)
 }
 
 // Supprimer tous les posts et commentaires
