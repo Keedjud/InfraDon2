@@ -48,7 +48,7 @@
 
 3. **Configurer les credentials**
    - Ouvrir `src/components/TheWelcome.vue`
-   - Modifier lignes 34-35 :
+   - Modifier lignes 43-44 :
      ```typescript
      const postsUrl = 'http://USER:PASSWORD@localhost:5984/infradon_inoe_posts/'
      const commentsUrl = 'http://USER:PASSWORD@localhost:5984/infradon_inoe_comments/'
@@ -125,7 +125,7 @@ npm run lint         # Vérifier le code
 
 ## 📝 Structure du Code
 
-**Fichier principal :** `src/components/TheWelcome.vue` (1750 lignes)
+**Fichier principal :** `src/components/TheWelcome.vue` (~1520 lignes)
 
 **Sections clés :**
 - Interfaces TypeScript (Post, Comment)
@@ -136,4 +136,4 @@ npm run lint         # Vérifier le code
 - Gestion conflits
 - Gestion attachments
 
-**Documentation inline :** 600+ lignes de commentaires expliquant tous les choix techniques
+**Documentation inline :** Commentaires concis expliquant les choix techniques
